@@ -1,9 +1,6 @@
 import numpy as np
-import matplotlib.animation as animation
-import matplotlib.patches as patches
 import pandas as pd
 import matplotlib.pyplot as plt
-import os
 from scipy.interpolate import RegularGridInterpolator
 
 # Function we are trying to emulate
@@ -20,6 +17,8 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
 
     X_c, Y_c = np.meshgrid(x_grid, y_grid, indexing='ij')
     corner_vals = test_func(X_c, Y_c)
+    # print(corner_vals)
+    # input()
 
     interp_func = RegularGridInterpolator((x_grid, y_grid), corner_vals, method='cubic')
     
@@ -46,19 +45,23 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
     
     # Compute Absolute Error Norm
     err = np.abs(interp_vals - quad_true_vals)
+    global linfy_norm
     linfy_norm = np.max(err)
+    # print(f"Infinity Norm: {linfy_norm}")
     return linfy_norm 
 
 def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, global_vals, fig_index, current_depth=0, leaf_boxes=None):
     if leaf_boxes is None:
         leaf_boxes = []
 
+    global quad_error 
     # Calculate error based on the global grid subset
     quad_error = evaluate_quad_error(xmin, xmax, ymin, ymax, global_points)
 
     # Base Cases
     if quad_error <= threshold or current_depth >= max_depth:
         leaf_boxes.append((xmin, xmax, ymin, ymax, current_depth))
+        print(f"Quad error: {quad_error}\nCurrent depth: {current_depth}")
         return leaf_boxes
 
     # Recursive Step: Split into 4 children
@@ -80,11 +83,11 @@ def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, 
 ## === Execute Algorithm === ##
 DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
 DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-ERROR_THRESHOLD = 0.01
-MAX_DEPTH = 6 
+ERROR_THRESHOLD = 0.0001
+MAX_DEPTH = 10 
 
 # Define the Global Uniform Training Grid
-TRAIN_RESOLUTION = 256 
+TRAIN_RESOLUTION = 1000 
 x_train_global = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TRAIN_RESOLUTION)
 y_train_global = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TRAIN_RESOLUTION)
 X_train_g, Y_train_g = np.meshgrid(x_train_global, y_train_global, indexing='ij')
@@ -126,11 +129,6 @@ ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
 ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
 ax.grid(False)
 
-# Save the plot, building the directories if missing
-fig_filename = f"figs/quadtree_grid/quadtree_boxes_{MAX_DEPTH}_{ERROR_THRESHOLD}.png"
-plt.savefig(fig_filename, bbox_inches='tight')
-plt.show()
-
 # Extract and save the unique node corners (Matches the Uniform Grid table structure)
 unique_corners = set()
 
@@ -154,8 +152,7 @@ df_points = pd.DataFrame({
 })
 
 # Save the final table to your directory
-points_csv = f"tables/quadtree_grid/quadtree_corners_{MAX_DEPTH}_{ERROR_THRESHOLD}.csv"
+points_csv = f"tables/quadtree_grid/quadtree_edges_{MAX_DEPTH}_{ERROR_THRESHOLD}.csv"
 df_points.to_csv(points_csv, index=False)
 
 print(f"Saved quadtree vertices table to: {points_csv}")
-
