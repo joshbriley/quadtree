@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import CloughTocher2DInterpolator
+
 
 # Function we are trying to emulate
 def test_func(x, y):
@@ -9,9 +11,8 @@ def test_func(x, y):
 
 # Compute Training error
 def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
-    # Evaluate training error from corners of cell
 
-    # Need 4 points for cubic spline 
+    # Evaluate training error
     num_of_points = 3 # minimum of 2
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
@@ -131,37 +132,30 @@ ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
 ax.grid(False)
 plt.show()
 
+# Extract and save the unique node corners 
+unique_corners = set()
+
+for xmin, xmax, ymin, ymax, depth in boxes:
+    unique_corners.add((xmin, ymin)) # Bottom-Left
+    unique_corners.add((xmax, ymin)) # Bottom-Right
+    unique_corners.add((xmin, ymax)) # Top-Left
+    unique_corners.add((xmax, ymax)) # Top-Right
+
+# Convert the unique coordinates into a structured NumPy array
+nodes_array = np.array(list(unique_corners))
+
+# Compute the function evaluation at each unique mesh node corner
+node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
+
+# Construct the uniform-equivalent Dataframe
 df_points = pd.DataFrame({
     'X': nodes_array[:, 0],
     'Y': nodes_array[:, 1],
     'F': node_vals
 })
-df_points.to_csv(f"tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv", index=False)
 
-# # Extract and save the unique node corners (Matches the Uniform Grid table structure)
-# unique_corners = set()
+# Save the final table to your directory
+csv_dir = f"tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv"
+df_points.to_csv(csv_dir, index=False)
 
-# for xmin, xmax, ymin, ymax, depth in boxes:
-#     unique_corners.add((xmin, ymin)) # Bottom-Left
-#     unique_corners.add((xmax, ymin)) # Bottom-Right
-#     unique_corners.add((xmin, ymax)) # Top-Left
-#     unique_corners.add((xmax, ymax)) # Top-Right
-
-# # Convert the unique coordinates into a structured NumPy array
-# nodes_array = np.array(list(unique_corners))
-
-# # Compute the function evaluation at each unique mesh node corner
-# node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
-
-# # Construct the uniform-equivalent Dataframe
-# df_points = pd.DataFrame({
-#     'X_Coordinate': nodes_array[:, 0],
-#     'Y_Coordinate': nodes_array[:, 1],
-#     'Function_Value': node_vals
-# })
-
-# # Save the final table to your directory
-# points_csv = f"tables/quadtree_grid/quadtree_edges_{MAX_DEPTH}_{ERROR_THRESHOLD}.csv"
-# df_points.to_csv(points_csv, index=False)
-
-# print(f"Saved quadtree vertices table to: {points_csv}")
+print(f"Saved quadtree vertices table to: {csv_dir}")
