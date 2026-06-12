@@ -51,13 +51,13 @@ func_flat = func_grid.flatten()
 
 # 8. Create a structured Pandas DataFrame for the entire grid landscape
 df_grid_evaluations = pd.DataFrame({
-    'X_Coordinate': x_flat,
-    'Y_Coordinate': y_flat,
-    'Function_Value': func_flat
+    'X': x_flat,
+    'Y': y_flat,
+    'F': func_flat
 })
 
 # 9. Save to a CSV file
-output_filename = f'tables/uniform_evaluations-{resolution}.csv'
+output_filename = f'tables/uniform_grid_func_evals/uniform_evaluations-{resolution}.csv'
 df_grid_evaluations.to_csv(output_filename, index=False)
 
 print(f"Saved all {len(df_grid_evaluations):,} grid points to '{output_filename}'\n---")
