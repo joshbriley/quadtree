@@ -11,17 +11,20 @@ def test_func(x, y):
 def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
     # Evaluate training error from corners of cell
 
-    # Local Interpolator using the 4 corners of the current box
-    x_grid = np.linspace(xmin, xmax, 4)
-    y_grid = np.linspace(ymin, ymax, 4)
+    # Need 4 points for cubic spline 
+    num_of_points = 3 # minimum of 2
+    x_corner = np.linspace(xmin, xmax, num_of_points)
+    y_corner = np.linspace(ymin, ymax, num_of_points)
 
-    X_c, Y_c = np.meshgrid(x_grid, y_grid, indexing='ij')
-    corner_vals = test_func(X_c, Y_c)
-    # print(corner_vals)
-    # input()
+    # X_c, Y_c = np.meshgrid(x_grid, y_grid, indexing='ij')
+    x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing='ij')
+    corner_vals = test_func(x_mesh, y_mesh)
+    points_input = np.column_stack((x_mesh.flatten(), y_mesh.flatten()))
+    values_input = corner_vals.flatten()
 
-    interp_func = RegularGridInterpolator((x_grid, y_grid), corner_vals, method='cubic')
-    
+    # interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method='cubic')
+    interp_func = CloughTocher2DInterpolator(points_input, values_input) 
+
     # Predict values for the internal global training points
     x_coords = global_points[:, 0]
     y_coords = global_points[:, 1]
@@ -45,9 +48,7 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
     
     # Compute Absolute Error Norm
     err = np.abs(interp_vals - quad_true_vals)
-    global linfy_norm
     linfy_norm = np.max(err)
-    # print(f"Infinity Norm: {linfy_norm}")
     return linfy_norm 
 
 def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, global_vals, fig_index, current_depth=0, leaf_boxes=None):
@@ -61,7 +62,7 @@ def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, 
     # Base Cases
     if quad_error <= threshold or current_depth >= max_depth:
         leaf_boxes.append((xmin, xmax, ymin, ymax, current_depth))
-        print(f"Quad error: {quad_error}\nCurrent depth: {current_depth}")
+        # print(f"Quad error: {quad_error}\nCurrent depth: {current_depth}")
         return leaf_boxes
 
     # Recursive Step: Split into 4 children
@@ -83,11 +84,11 @@ def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, 
 ## === Execute Algorithm === ##
 DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
 DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-ERROR_THRESHOLD = 0.0001
-MAX_DEPTH = 10 
+ERROR_THRESHOLD = 1e-2
+MAX_DEPTH = 7 
 
 # Define the Global Uniform Training Grid
-TRAIN_RESOLUTION = 1000 
+TRAIN_RESOLUTION = 500 
 x_train_global = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TRAIN_RESOLUTION)
 y_train_global = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TRAIN_RESOLUTION)
 X_train_g, Y_train_g = np.meshgrid(x_train_global, y_train_global, indexing='ij')
@@ -128,31 +129,39 @@ ax.set_ylabel('Y')
 ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
 ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
 ax.grid(False)
+plt.show()
 
-# Extract and save the unique node corners (Matches the Uniform Grid table structure)
-unique_corners = set()
-
-for xmin, xmax, ymin, ymax, depth in boxes:
-    unique_corners.add((xmin, ymin)) # Bottom-Left
-    unique_corners.add((xmax, ymin)) # Bottom-Right
-    unique_corners.add((xmin, ymax)) # Top-Left
-    unique_corners.add((xmax, ymax)) # Top-Right
-
-# Convert the unique coordinates into a structured NumPy array
-nodes_array = np.array(list(unique_corners))
-
-# Compute the function evaluation at each unique mesh node corner
-node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
-
-# Construct the uniform-equivalent Dataframe
 df_points = pd.DataFrame({
-    'X_Coordinate': nodes_array[:, 0],
-    'Y_Coordinate': nodes_array[:, 1],
-    'Function_Value': node_vals
+    'X': nodes_array[:, 0],
+    'Y': nodes_array[:, 1],
+    'F': node_vals
 })
+df_points.to_csv(f"tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv", index=False)
 
-# Save the final table to your directory
-points_csv = f"tables/quadtree_grid/quadtree_edges_{MAX_DEPTH}_{ERROR_THRESHOLD}.csv"
-df_points.to_csv(points_csv, index=False)
+# # Extract and save the unique node corners (Matches the Uniform Grid table structure)
+# unique_corners = set()
 
-print(f"Saved quadtree vertices table to: {points_csv}")
+# for xmin, xmax, ymin, ymax, depth in boxes:
+#     unique_corners.add((xmin, ymin)) # Bottom-Left
+#     unique_corners.add((xmax, ymin)) # Bottom-Right
+#     unique_corners.add((xmin, ymax)) # Top-Left
+#     unique_corners.add((xmax, ymax)) # Top-Right
+
+# # Convert the unique coordinates into a structured NumPy array
+# nodes_array = np.array(list(unique_corners))
+
+# # Compute the function evaluation at each unique mesh node corner
+# node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
+
+# # Construct the uniform-equivalent Dataframe
+# df_points = pd.DataFrame({
+#     'X_Coordinate': nodes_array[:, 0],
+#     'Y_Coordinate': nodes_array[:, 1],
+#     'Function_Value': node_vals
+# })
+
+# # Save the final table to your directory
+# points_csv = f"tables/quadtree_grid/quadtree_edges_{MAX_DEPTH}_{ERROR_THRESHOLD}.csv"
+# df_points.to_csv(points_csv, index=False)
+
+# print(f"Saved quadtree vertices table to: {points_csv}")
