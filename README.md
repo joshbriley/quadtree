@@ -3,7 +3,7 @@
 ## Description
 Decomposing a domain using the quadtree method and comparing the interpolation error to a uniform discretization.
 
-Currently using the Clough-Tochard Interpolation method for training and testing. 
+Currently trying to implement an approximation method on this branch, instead of interpolation.  
 
 ### Python Scripts
 - `quadtree_toy.py`: Generates quadtree CSV file (`tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv`) with x-points, y-points, and their cooresponding function evaluations.
