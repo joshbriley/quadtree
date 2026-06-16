@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import json
 from scipy.interpolate import RegularGridInterpolator
 from scipy.interpolate import CloughTocher2DInterpolator
 
@@ -105,6 +106,30 @@ class QuadTreeNode:
             depth += 1
             node = list(node.children.values())[0]
         return depth
+    
+    def to_dict(self):
+        """Serialize node to dictionary for JSON storage."""
+        data = {
+            'bounds': list(self.bounds),
+            'is_leaf': self.is_leaf,
+            'split_point': list(self.split_point) if self.split_point else None,
+            'coefficients': self.coefficients.tolist() if self.coefficients is not None else None,
+            'children': {}
+        }
+        for key, child in self.children.items():
+            data['children'][key] = child.to_dict()
+        return data
+    
+    @staticmethod
+    def from_dict(data):
+        """Reconstruct node from dictionary."""
+        node = QuadTreeNode(tuple(data['bounds']))
+        node.is_leaf = data['is_leaf']
+        node.split_point = tuple(data['split_point']) if data['split_point'] else None
+        node.coefficients = np.array(data['coefficients']) if data['coefficients'] is not None else None
+        for key, child_data in data['children'].items():
+            node.children[key] = QuadTreeNode.from_dict(child_data)
+        return node
 
 
 def evaluate_polynomial(coeffs, x, y, bounds):
@@ -166,7 +191,27 @@ def build_quadtree(xmin, xmax, ymin, ymax, error_threshold, max_depth, global_po
     
     return node
 
-## === Execute Algorithm === ##
+def save_quadtree(quadtree_root, filepath):
+    """Save complete quadtree structure to JSON file."""
+    data = {
+        'tree': quadtree_root.to_dict(),
+        'format': 'quadtree_v1'
+    }
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+    print(f"Saved quadtree to: {filepath}")
+
+def load_quadtree(filepath):
+    """Load quadtree structure from JSON file."""
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    
+    if data.get('format') != 'quadtree_v1':
+        raise ValueError("Invalid quadtree file format")
+    
+    quadtree_root = QuadTreeNode.from_dict(data['tree'])
+    print(f"Loaded quadtree from: {filepath}")
+    return quadtree_root
 if __name__ == "__main__":
     DOMAIN_XMIN, DOMAIN_XMAX = 0, 1.0
     DOMAIN_YMIN, DOMAIN_YMAX = 0, 1.0
@@ -219,33 +264,9 @@ if __name__ == "__main__":
     ax.grid(False)
     plt.show()
     
-    # Extract and save the unique node corners 
-    unique_corners = set()
-    
-    for xmin, xmax, ymin, ymax, depth in boxes:
-        unique_corners.add((xmin, ymin)) # Bottom-Left
-        unique_corners.add((xmax, ymin)) # Bottom-Right
-        unique_corners.add((xmin, ymax)) # Top-Left
-        unique_corners.add((xmax, ymax)) # Top-Right
-    
-    # Convert the unique coordinates into a structured NumPy array
-    nodes_array = np.array(list(unique_corners))
-    
-    # Compute the function evaluation at each unique mesh node corner
-    node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
-    
-    # Construct the uniform-equivalent Dataframe
-    df_points = pd.DataFrame({
-        'X': nodes_array[:, 0],
-        'Y': nodes_array[:, 1],
-        'F': node_vals
-    })
-    
-    # Save the final table to your directory
-    csv_dir = f"tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv"
-    df_points.to_csv(csv_dir, index=False)
-    
-    print(f"Saved quadtree vertices table to: {csv_dir}")
+    # Save the complete quadtree structure
+    quadtree_file = f"tables/quadtree_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.json"
+    save_quadtree(quadtree_root, quadtree_file)
     
     # --- Demonstrate evaluation at random points ---
     print("\n--- Quadtree Evaluation Examples ---")
@@ -258,3 +279,16 @@ if __name__ == "__main__":
             print(f"  Point ({x:.4f}, {y:.4f}): Predicted={pred:.6f}, True={true:.6f}, Error={error:.2e}")
         except Exception as e:
             print(f"  Point ({x:.4f}, {y:.4f}): Error - {e}")
+    
+    # --- Demonstrate loading the quadtree from file ---
+    print("\n--- Loading Quadtree from File ---")
+    loaded_quadtree = load_quadtree(quadtree_file)
+    print("Loaded quadtree successfully!")
+    
+    # Verify loaded tree works
+    print("\n--- Verification with Loaded Tree ---")
+    for x, y in test_points[:2]:
+        pred = loaded_quadtree.evaluate(x, y)
+        true = test_func(x, y)
+        error = abs(pred - true)
+        print(f"  Point ({x:.4f}, {y:.4f}): Predicted={pred:.6f}, True={true:.6f}, Error={error:.2e}")
