@@ -1,52 +1,86 @@
 import numpy as np
-#import pandas as pd
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
-# from scipy.interpolate import CloughTocher2DInterpolator
 
 """
-Build a quadtree to achieve a global error across the domain using a cubic spline interpolant and a given test function. Store the quadtree s.t. it can be traversed, loaded, and interpolated easily in-stitu as a surrogate for expensive functions. 
+Build an adaptive quadtree from a uniform data table, without assuming access
+to the underlying analytical function that produced the table.
 """
 
-# Function we are trying to emulate
+SOURCE_TABLE_FILE = "tables/uniform_grid_func_evals/uniform_evaluations-128.csv"
+ERROR_THRESHOLD = 1e-4
+MAX_DEPTH = 7
+
+_DEFAULT_SOURCE_INTERPOLATOR = None
+
+
+def load_uniform_table(csv_path):
+    df = pd.read_csv(csv_path)
+    if not {"X", "Y", "F"}.issubset(df.columns):
+        raise ValueError("Uniform table must contain X, Y, and F columns.")
+
+    x_coords = np.sort(df["X"].unique())
+    y_coords = np.sort(df["Y"].unique())
+    pivot = df.pivot(index="X", columns="Y", values="F").sort_index().sort_index(axis=1)
+
+    if pivot.shape != (len(x_coords), len(y_coords)):
+        raise ValueError("Uniform table is missing grid points or is not rectangular.")
+
+    grid_values = pivot.to_numpy(dtype=float)
+    global_points = df[["X", "Y"]].to_numpy(dtype=float)
+    global_values = df["F"].to_numpy(dtype=float)
+
+    interp_method = "cubic" if len(x_coords) >= 4 and len(y_coords) >= 4 else "linear"
+    source_interpolator = RegularGridInterpolator(
+        (x_coords, y_coords),
+        grid_values,
+        method=interp_method,
+        bounds_error=False,
+        fill_value=None,
+    )
+
+    global _DEFAULT_SOURCE_INTERPOLATOR
+    _DEFAULT_SOURCE_INTERPOLATOR = source_interpolator
+
+    return x_coords, y_coords, global_points, global_values, source_interpolator
+
 def test_func(x, y):
-    return np.sin(x * y) + 1.0 / (1.0 + np.exp(-100*(x - y)))
+    """Compatibility wrapper for scripts that still import test_func."""
+    if _DEFAULT_SOURCE_INTERPOLATOR is None:
+        raise RuntimeError("No source table is loaded. Call load_uniform_table(...) first.")
 
-# Compute Training error and export interpolation polynomials
-def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
+    x_arr, y_arr = np.broadcast_arrays(np.asarray(x), np.asarray(y))
+    sample_points = np.column_stack((x_arr.ravel(), y_arr.ravel()))
+    sampled = _DEFAULT_SOURCE_INTERPOLATOR(sample_points).reshape(x_arr.shape)
+    if sampled.shape == ():
+        return float(sampled)
+    return sampled
 
-    num_of_points = 4 # minimum of 2
+def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points, global_values, source_interpolator):
+    num_of_points = 4
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
 
-    # Create mesh
-    x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing='ij')
-    corner_vals = test_func(x_mesh, y_mesh)
-    # points_input = np.column_stack((x_mesh.flatten(), y_mesh.flatten()))
-    # values_input = corner_vals.flatten()
+    x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
+    corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
+    corner_vals = source_interpolator(corner_points).reshape(num_of_points, num_of_points)
 
-    # Build interpolant
-    interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method='cubic')
-    # interp_func = CloughTocher2DInterpolator(points_input, values_input) 
+    interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method="cubic")
 
-    # Extract x & y values from uniform grid
     x_coords = global_points[:, 0]
     y_coords = global_points[:, 1]
-
-    # Create a boolean mask for points only inside the cell
     mask = (x_coords >= xmin) & (x_coords <= xmax) & (y_coords >= ymin) & (y_coords <= ymax)
 
-    # Filter the global points for only points in the current cell
     testing_pts = global_points[mask]
+    testing_vals = global_values[mask]
     if testing_pts.shape[0] == 0:
         raise ValueError("No points found in cell for error evaluation.")
+
     interp_vals = interp_func(testing_pts)
-    quad_true_vals = test_func(testing_pts[:, 0], testing_pts[:, 1])
-    
-    # Compute Absolute Error Norm
-    err = np.abs(interp_vals - quad_true_vals)
+    err = np.abs(interp_vals - testing_vals)
     linfy_norm = np.max(err)
-    return linfy_norm, corner_vals 
+    return linfy_norm, corner_vals
 
 class QuadTreeNode:
     """Stores a quadtree cell with splitting point and polynomial coefficients."""
@@ -142,7 +176,6 @@ class QuadTreeNode:
         
         return nodes[0] if nodes else None
 
-
 def evaluate_polynomial(vals, x, y, bounds):
     """Evaluate cubic spline polynomial at (x, y) within cell bounds."""
     xmin, xmax, ymin, ymax = bounds
@@ -155,16 +188,34 @@ def evaluate_polynomial(vals, x, y, bounds):
     interp = RegularGridInterpolator((x_corner, y_corner), vals.reshape(4, 4), method='cubic')
     return float(interp([[x, y]])[0])
 
-
 # Quadtree Builder -- Must be able to export the quadtree structure and the interpolation polynomials at each leaf node for in-situ surrogate evaluation.
-def build_quadtree(xmin, xmax, ymin, ymax, error_threshold, max_depth, global_points, global_vals, depth=0):
+def build_quadtree(
+    xmin,
+    xmax,
+    ymin,
+    ymax,
+    error_threshold,
+    max_depth,
+    global_points,
+    global_vals,
+    source_interpolator,
+    depth=0,
+):
     """Recursively build adaptive quadtree based on interpolation error."""
     
     node = QuadTreeNode((xmin, xmax, ymin, ymax))
     
     # Evaluate error for this cell
     try:
-        error, coeffs = evaluate_quad_error(xmin, xmax, ymin, ymax, global_points)
+        error, coeffs = evaluate_quad_error(
+            xmin,
+            xmax,
+            ymin,
+            ymax,
+            global_points,
+            global_vals,
+            source_interpolator,
+        )
     except ValueError:
         # No points in cell, mark as leaf anyway
         node.is_leaf = True
@@ -190,7 +241,18 @@ def build_quadtree(xmin, xmax, ymin, ymax, error_threshold, max_depth, global_po
     }
     
     for key, (x1, x2, y1, y2) in quadrants.items():
-        node.children[key] = build_quadtree(x1, x2, y1, y2, error_threshold, max_depth, global_points, global_vals, depth + 1)
+        node.children[key] = build_quadtree(
+            x1,
+            x2,
+            y1,
+            y2,
+            error_threshold,
+            max_depth,
+            global_points,
+            global_vals,
+            source_interpolator,
+            depth + 1,
+        )
     
     return node
 
@@ -295,59 +357,52 @@ def load_quadtree(filepath):
     return nodes[0] if nodes else None
 
 if __name__ == "__main__":
-    DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
-    DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-    ERROR_THRESHOLD = 1e-4
-    MAX_DEPTH = 7
-    
-    # Define the Global Uniform Training Grid
-    TRAIN_RESOLUTION = 256
-    x_train_global = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TRAIN_RESOLUTION)
-    y_train_global = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TRAIN_RESOLUTION)
-    X_train_g, Y_train_g = np.meshgrid(x_train_global, y_train_global, indexing='ij')
-    
-    global_points = np.vstack([X_train_g.flatten(), Y_train_g.flatten()]).T
-    global_vals = test_func(global_points[:, 0], global_points[:, 1])
-    
-    print("Starting Adaptive Quadtree Decomposition...")
-    quadtree_root = build_quadtree(DOMAIN_XMIN, DOMAIN_XMAX, DOMAIN_YMIN, DOMAIN_YMAX, 
-                                    ERROR_THRESHOLD, MAX_DEPTH, global_points, None)
-    
-    # Extract leaf cells for visualization
+    x_coords, y_coords, global_points, global_vals, source_interpolator = load_uniform_table(SOURCE_TABLE_FILE)
+    domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
+    domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
+    train_resolution = len(x_coords)
+
+    print("Starting Adaptive Quadtree Decomposition from Uniform Table...")
+    quadtree_root = build_quadtree(
+        domain_xmin,
+        domain_xmax,
+        domain_ymin,
+        domain_ymax,
+        ERROR_THRESHOLD,
+        MAX_DEPTH,
+        global_points,
+        global_vals,
+        source_interpolator,
+    )
+
     boxes = quadtree_root.get_leaf_cells()
-    
-    # --- Generate High-Res Background Heatmap ---
-    x_bg = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, 400)
-    y_bg = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, 400)
-    X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing='ij')
+
+    x_bg = np.linspace(domain_xmin, domain_xmax, 400)
+    y_bg = np.linspace(domain_ymin, domain_ymax, 400)
+    X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing="ij")
     Z_bg = test_func(X_bg, Y_bg)
-    
-    # --- Plotting Layout ---
+
     fig, ax = plt.subplots(figsize=(10, 8))
-    
-    # Plot underlying function data as a background heatmap
-    pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap='viridis', shading='auto', alpha=0.75)
-    fig.colorbar(pc, ax=ax, label='f(x, y) Value')
-    
-    # Outline each leaf node bounding box
+    pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap="viridis", shading="auto", alpha=0.75)
+    fig.colorbar(pc, ax=ax, label="table value")
+
     for xmin, xmax, ymin, ymax, depth in boxes:
         x_box = [xmin, xmax, xmax, xmin, xmin]
         y_box = [ymin, ymin, ymax, ymax, ymin]
-        
-        # Dynamically thin lines for deeper levels so the plot remains clean
         linewidth = max(0.5, 2.5 - 0.5 * depth)
-        ax.plot(x_box, y_box, color='red', linewidth=linewidth, alpha=0.8)
-    
-    ax.set_title(f'Adaptive Quadtree Grid (Global Training Grid Method)\nThreshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
-    ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
+        ax.plot(x_box, y_box, color="red", linewidth=linewidth, alpha=0.8)
+
+    ax.set_title(
+        f"Adaptive Quadtree from Uniform Table\n"
+        f"Threshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}"
+    )
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_xlim(domain_xmin, domain_xmax)
+    ax.set_ylim(domain_ymin, domain_ymax)
     ax.grid(False)
     plt.savefig("figs/quadtree_grid.png", dpi=300)
-    # plt.show()
-    
-    # Save the complete quadtree structure
-    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.npz"
+
+    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
     save_quadtree(quadtree_root, quadtree_file)
     
