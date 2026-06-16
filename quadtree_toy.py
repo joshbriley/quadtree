@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import json
+import h5py
 from scipy.interpolate import RegularGridInterpolator
 from scipy.interpolate import CloughTocher2DInterpolator
 
@@ -106,30 +106,50 @@ class QuadTreeNode:
             depth += 1
             node = list(node.children.values())[0]
         return depth
-    
-    def to_dict(self):
-        """Serialize node to dictionary for JSON storage."""
-        data = {
-            'bounds': list(self.bounds),
+    def _flatten_to_list(self, nodes_list, node_index_map):
+        """Flatten tree to a list for storage."""
+        node_id = len(nodes_list)
+        node_index_map[id(self)] = node_id
+        
+        child_indices = {}
+        for key in ['NE', 'NW', 'SE', 'SW']:
+            if key in self.children:
+                child_indices[key] = None  # Placeholder, will fill after recursion
+        
+        nodes_list.append({
+            'bounds': self.bounds,
             'is_leaf': self.is_leaf,
-            'split_point': list(self.split_point) if self.split_point else None,
-            'coefficients': self.coefficients.tolist() if self.coefficients is not None else None,
-            'children': {}
-        }
+            'split_point': self.split_point,
+            'coefficients': self.coefficients,
+            'child_indices': child_indices
+        })
+        
         for key, child in self.children.items():
-            data['children'][key] = child.to_dict()
-        return data
+            child_indices[key] = child._flatten_to_list(nodes_list, node_index_map)
+        
+        return node_id
     
     @staticmethod
-    def from_dict(data):
-        """Reconstruct node from dictionary."""
-        node = QuadTreeNode(tuple(data['bounds']))
-        node.is_leaf = data['is_leaf']
-        node.split_point = tuple(data['split_point']) if data['split_point'] else None
-        node.coefficients = np.array(data['coefficients']) if data['coefficients'] is not None else None
-        for key, child_data in data['children'].items():
-            node.children[key] = QuadTreeNode.from_dict(child_data)
-        return node
+    def _unflatten_from_list(nodes_list):
+        """Reconstruct tree from flattened list."""
+        if not nodes_list:
+            return None
+        
+        nodes = []
+        for node_data in nodes_list:
+            node = QuadTreeNode(node_data['bounds'])
+            node.is_leaf = node_data['is_leaf']
+            node.split_point = node_data['split_point']
+            node.coefficients = node_data['coefficients']
+            node._child_indices = node_data.get('child_indices', {})
+            nodes.append(node)
+        
+        for i, node_data in enumerate(nodes_list):
+            for key, child_idx in node_data['child_indices'].items():
+                if child_idx is not None:
+                    nodes[i].children[key] = nodes[child_idx]
+        
+        return nodes[0] if nodes else None
 
 
 def evaluate_polynomial(coeffs, x, y, bounds):
@@ -192,26 +212,104 @@ def build_quadtree(xmin, xmax, ymin, ymax, error_threshold, max_depth, global_po
     return node
 
 def save_quadtree(quadtree_root, filepath):
-    """Save complete quadtree structure to JSON file."""
-    data = {
-        'tree': quadtree_root.to_dict(),
-        'format': 'quadtree_v1'
+    """Save quadtree to compressed NPZ file using flattened structure."""
+    nodes_list = []
+    quadtree_root._flatten_to_list(nodes_list, {})
+    
+    # Store metadata and node data separately for efficiency
+    metadata = {
+        'format': 'quadtree_v1',
+        'num_nodes': len(nodes_list)
     }
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
+    
+    # Flatten node data into numpy arrays
+    bounds_list = []
+    is_leaf_list = []
+    split_points_list = []
+    child_indices_list = []
+    
+    for node_data in nodes_list:
+        bounds_list.append(node_data['bounds'])
+        is_leaf_list.append(node_data['is_leaf'])
+        split_points_list.append(node_data['split_point'] if node_data['split_point'] else [0, 0])
+        
+        # Encode children as 4-tuple (NE, NW, SE, SW)
+        child_indices = node_data['child_indices']
+        indices = [
+            child_indices.get('NE', -1),
+            child_indices.get('NW', -1),
+            child_indices.get('SE', -1),
+            child_indices.get('SW', -1)
+        ]
+        child_indices_list.append(indices)
+    
+    # Collect coefficients (some nodes have None)
+    coefficients_dict = {}
+    for i, node_data in enumerate(nodes_list):
+        if node_data['coefficients'] is not None:
+            coefficients_dict[f'coeff_{i}'] = node_data['coefficients']
+    
+    # Save as NPZ with compression
+    np.savez_compressed(
+        filepath,
+        format='quadtree_v1',
+        num_nodes=np.array([len(nodes_list)]),
+        bounds=np.array(bounds_list, dtype=np.float32),
+        is_leaf=np.array(is_leaf_list, dtype=bool),
+        split_points=np.array(split_points_list, dtype=np.float32),
+        child_indices=np.array(child_indices_list, dtype=np.int32),
+        **coefficients_dict
+    )
     print(f"Saved quadtree to: {filepath}")
 
 def load_quadtree(filepath):
-    """Load quadtree structure from JSON file."""
-    with open(filepath, 'r') as f:
-        data = json.load(f)
+    """Load quadtree from compressed NPZ file."""
+    data = np.load(filepath, allow_pickle=False)
     
-    if data.get('format') != 'quadtree_v1':
+    if data['format'] != 'quadtree_v1':
         raise ValueError("Invalid quadtree file format")
     
-    quadtree_root = QuadTreeNode.from_dict(data['tree'])
+    num_nodes = int(data['num_nodes'][0])
+    bounds_list = data['bounds']
+    is_leaf_list = data['is_leaf']
+    split_points_list = data['split_points']
+    child_indices_list = data['child_indices']
+    
+    # Reconstruct nodes
+    nodes_list = []
+    for i in range(num_nodes):
+        node_data = {
+            'bounds': tuple(bounds_list[i]),
+            'is_leaf': bool(is_leaf_list[i]),
+            'split_point': tuple(split_points_list[i]) if not is_leaf_list[i] else None,
+            'coefficients': data[f'coeff_{i}'] if f'coeff_{i}' in data else None,
+            'child_indices': {}
+        }
+        nodes_list.append(node_data)
+    
+    # Reconstruct tree using flattened list
+    nodes = []
+    for node_data in nodes_list:
+        node = QuadTreeNode(node_data['bounds'])
+        node.is_leaf = node_data['is_leaf']
+        node.split_point = node_data['split_point']
+        node.coefficients = node_data['coefficients']
+        nodes.append(node)
+    
+    # Link children
+    for i, child_indices in enumerate(child_indices_list):
+        ne_idx, nw_idx, se_idx, sw_idx = child_indices
+        if ne_idx >= 0:
+            nodes[i].children['NE'] = nodes[ne_idx]
+        if nw_idx >= 0:
+            nodes[i].children['NW'] = nodes[nw_idx]
+        if se_idx >= 0:
+            nodes[i].children['SE'] = nodes[se_idx]
+        if sw_idx >= 0:
+            nodes[i].children['SW'] = nodes[sw_idx]
+    
     print(f"Loaded quadtree from: {filepath}")
-    return quadtree_root
+    return nodes[0] if nodes else None
 if __name__ == "__main__":
     DOMAIN_XMIN, DOMAIN_XMAX = 0, 1.0
     DOMAIN_YMIN, DOMAIN_YMAX = 0, 1.0
@@ -265,7 +363,7 @@ if __name__ == "__main__":
     plt.show()
     
     # Save the complete quadtree structure
-    quadtree_file = f"tables/quadtree_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.json"
+    quadtree_file = f"tables/quadtree_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.npz"
     save_quadtree(quadtree_root, quadtree_file)
     
     # --- Demonstrate evaluation at random points ---
