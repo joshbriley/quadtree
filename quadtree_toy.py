@@ -57,109 +57,204 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
     linfy_norm = np.max(err)
     return linfy_norm, coeffs 
 
-def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, global_vals, fig_index, current_depth=0, leaf_boxes=None):
-    if quad_data is None:
-        quad_data = []
+class QuadTreeNode:
+    """Stores a quadtree cell with splitting point and polynomial coefficients."""
+    
+    def __init__(self, bounds):
+        self.bounds = bounds  # (xmin, xmax, ymin, ymax)
+        self.split_point = None  # (x_mid, y_mid)
+        self.coefficients = None  # Polynomial coeffs if leaf
+        self.children = {}  # {'NE': Node, 'NW': Node, 'SE': Node, 'SW': Node}
+        self.is_leaf = False
+    
+    def evaluate(self, x, y):
+        """Navigate tree and evaluate polynomial at (x, y)."""
+        if self.is_leaf:
+            if self.coefficients is None:
+                raise ValueError("Leaf node has no coefficients")
+            return evaluate_polynomial(self.coefficients, x, y, self.bounds)
+        
+        # Navigate to correct child quadrant
+        xmin, xmax, ymin, ymax = self.bounds
+        x_mid, y_mid = self.split_point
+        
+        if x >= x_mid:
+            child_key = 'NE' if y >= y_mid else 'SE'
+        else:
+            child_key = 'NW' if y >= y_mid else 'SW'
+        
+        return self.children[child_key].evaluate(x, y)
+    
+    def get_leaf_cells(self):
+        """Return list of all leaf cells (xmin, xmax, ymin, ymax, depth)."""
+        if self.is_leaf:
+            depth = self._compute_depth()
+            xmin, xmax, ymin, ymax = self.bounds
+            return [(xmin, xmax, ymin, ymax, depth)]
+        
+        cells = []
+        for child in self.children.values():
+            cells.extend(child.get_leaf_cells())
+        return cells
+    
+    def _compute_depth(self):
+        """Compute depth of this node in the tree."""
+        depth = 0
+        node = self
+        while node.split_point is not None:
+            depth += 1
+            node = list(node.children.values())[0]
+        return depth
 
-    # Calculate error based on the global grid subset
-    quad_error, coeffs = evaluate_quad_error(xmin, xmax, ymin, ymax, global_points)
 
-    # Base Cases
-    if quad_error <= threshold or current_depth >= max_depth:
-        quad_data.append((xmin, xmax, ymin, ymax, current_depth))
-        # print(f"Quad error: {quad_error}\nCurrent depth: {current_depth}")
-        return leaf_boxes
+def evaluate_polynomial(coeffs, x, y, bounds):
+    """Evaluate cubic spline polynomial at (x, y) within cell bounds."""
+    xmin, xmax, ymin, ymax = bounds
+    
+    # Normalize coordinates to [0, 1]
+    x_norm = (x - xmin) / (xmax - xmin)
+    y_norm = (y - ymin) / (ymax - ymin)
+    
+    # Evaluate using scipy's RegularGridInterpolator evaluation
+    # The coefficients are stored in a specific format from RegularGridInterpolator
+    # We evaluate the cubic spline directly
+    from scipy.interpolate import RegularGridInterpolator
+    
+    # For simplicity, reconstruct evaluator using stored coefficients
+    x_pts = np.linspace(0, 1, 4)
+    y_pts = np.linspace(0, 1, 4)
+    
+    interp = RegularGridInterpolator((x_pts, y_pts), coeffs.reshape(4, 4), method='cubic')
+    return float(interp([[x_norm, y_norm]])[0])
 
-    # Recursive Step: Split into 4 children
-    x_mid = (xmin + xmax) / 2.0
-    y_mid = (ymin + ymax) / 2.0
 
-    children = [
-        (x_mid, xmax,  y_mid, ymax),  # Quad I
-        (xmin,  x_mid,  y_mid, ymax),  # Quad II
-        (xmin,  x_mid,  ymin,  y_mid),  # Quad III
-        (x_mid, xmax,  ymin,  y_mid)   # Quad IV
-    ]
-
-    for c_xmin, c_xmax, c_ymin, c_ymax in children:
-        build_quadtree(c_xmin, c_xmax, c_ymin, c_ymax, threshold, max_depth, 
-                       global_points, global_vals, fig_index, current_depth + 1, leaf_boxes)
-    return quad_data
+# Quadtree Builder -- Must be able to export the quadtree structure and the interpolation polynomials at each leaf node for in-situ surrogate evaluation.
+def build_quadtree(xmin, xmax, ymin, ymax, error_threshold, max_depth, global_points, global_vals, depth=0):
+    """Recursively build adaptive quadtree based on interpolation error."""
+    
+    node = QuadTreeNode((xmin, xmax, ymin, ymax))
+    
+    # Evaluate error for this cell
+    try:
+        error, coeffs = evaluate_quad_error(xmin, xmax, ymin, ymax, global_points)
+    except ValueError:
+        # No points in cell, mark as leaf anyway
+        node.is_leaf = True
+        node.coefficients = np.zeros((4, 4))
+        return node
+    
+    # Check stopping criteria
+    if error <= error_threshold or depth >= max_depth:
+        node.is_leaf = True
+        node.coefficients = coeffs
+        return node
+    
+    # Split cell into 4 quadrants
+    x_mid = (xmin + xmax) / 2
+    y_mid = (ymin + ymax) / 2
+    node.split_point = (x_mid, y_mid)
+    
+    quadrants = {
+        'NE': (x_mid, xmax, y_mid, ymax),
+        'NW': (xmin, x_mid, y_mid, ymax),
+        'SE': (x_mid, xmax, ymin, y_mid),
+        'SW': (xmin, x_mid, ymin, y_mid)
+    }
+    
+    for key, (x1, x2, y1, y2) in quadrants.items():
+        node.children[key] = build_quadtree(x1, x2, y1, y2, error_threshold, max_depth, global_points, global_vals, depth + 1)
+    
+    return node
 
 ## === Execute Algorithm === ##
-DOMAIN_XMIN, DOMAIN_XMAX = 0, 1.0
-DOMAIN_YMIN, DOMAIN_YMAX = 0, 1.0
-ERROR_THRESHOLD = 1e-2
-MAX_DEPTH = 3 
-
-# Define the Global Uniform Training Grid
-TRAIN_RESOLUTION = 128 
-x_train_global = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TRAIN_RESOLUTION)
-y_train_global = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TRAIN_RESOLUTION)
-X_train_g, Y_train_g = np.meshgrid(x_train_global, y_train_global, indexing='ij')
-
-global_points = np.vstack([X_train_g.flatten(), Y_train_g.flatten()]).T
-global_vals = test_func(global_points[:, 0], global_points[:, 1])
-fig_index = 0
-
-print("Starting Adaptive Quadtree Decomposition...")
-boxes = build_quadtree(DOMAIN_XMIN, DOMAIN_XMAX, DOMAIN_YMIN, DOMAIN_YMAX, 
-                       ERROR_THRESHOLD, MAX_DEPTH, global_points, global_vals, fig_index)
-
-# --- Generate High-Res Background Heatmap ---
-x_bg = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, 400)
-y_bg = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, 400)
-X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing='ij')
-Z_bg = test_func(X_bg, Y_bg)
-
-# --- Plotting Layout ---
-fig, ax = plt.subplots(figsize=(10, 8))
-
-# Plot underlying function data as a background heatmap
-pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap='viridis', shading='auto', alpha=0.75)
-fig.colorbar(pc, ax=ax, label='f(x, y) Value')
-
-# Outline each leaf node bounding box
-for xmin, xmax, ymin, ymax, depth in boxes:
-    x_box = [xmin, xmax, xmax, xmin, xmin]
-    y_box = [ymin, ymin, ymax, ymax, ymin]
+if __name__ == "__main__":
+    DOMAIN_XMIN, DOMAIN_XMAX = 0, 1.0
+    DOMAIN_YMIN, DOMAIN_YMAX = 0, 1.0
+    ERROR_THRESHOLD = 1e-2
+    MAX_DEPTH = 3 
     
-    # Dynamically thin lines for deeper levels so the plot remains clean
-    linewidth = max(0.5, 2.5 - 0.5 * depth)
-    ax.plot(x_box, y_box, color='red', linewidth=linewidth, alpha=0.8)
-
-ax.set_title(f'Adaptive Quadtree Grid (Global Training Grid Method)\nThreshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}')
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
-ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
-ax.grid(False)
-plt.show()
-
-# Extract and save the unique node corners 
-unique_corners = set()
-
-for xmin, xmax, ymin, ymax, depth in boxes:
-    unique_corners.add((xmin, ymin)) # Bottom-Left
-    unique_corners.add((xmax, ymin)) # Bottom-Right
-    unique_corners.add((xmin, ymax)) # Top-Left
-    unique_corners.add((xmax, ymax)) # Top-Right
-
-# Convert the unique coordinates into a structured NumPy array
-nodes_array = np.array(list(unique_corners))
-
-# Compute the function evaluation at each unique mesh node corner
-node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
-
-# Construct the uniform-equivalent Dataframe
-df_points = pd.DataFrame({
-    'X': nodes_array[:, 0],
-    'Y': nodes_array[:, 1],
-    'F': node_vals
-})
-
-# Save the final table to your directory
-csv_dir = f"tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv"
-df_points.to_csv(csv_dir, index=False)
-
-print(f"Saved quadtree vertices table to: {csv_dir}")
+    # Define the Global Uniform Training Grid
+    TRAIN_RESOLUTION = 128 
+    x_train_global = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TRAIN_RESOLUTION)
+    y_train_global = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TRAIN_RESOLUTION)
+    X_train_g, Y_train_g = np.meshgrid(x_train_global, y_train_global, indexing='ij')
+    
+    global_points = np.vstack([X_train_g.flatten(), Y_train_g.flatten()]).T
+    global_vals = test_func(global_points[:, 0], global_points[:, 1])
+    
+    print("Starting Adaptive Quadtree Decomposition...")
+    quadtree_root = build_quadtree(DOMAIN_XMIN, DOMAIN_XMAX, DOMAIN_YMIN, DOMAIN_YMAX, 
+                                    ERROR_THRESHOLD, MAX_DEPTH, global_points, None)
+    
+    # Extract leaf cells for visualization
+    boxes = quadtree_root.get_leaf_cells()
+    
+    # --- Generate High-Res Background Heatmap ---
+    x_bg = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, 400)
+    y_bg = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, 400)
+    X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing='ij')
+    Z_bg = test_func(X_bg, Y_bg)
+    
+    # --- Plotting Layout ---
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Plot underlying function data as a background heatmap
+    pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap='viridis', shading='auto', alpha=0.75)
+    fig.colorbar(pc, ax=ax, label='f(x, y) Value')
+    
+    # Outline each leaf node bounding box
+    for xmin, xmax, ymin, ymax, depth in boxes:
+        x_box = [xmin, xmax, xmax, xmin, xmin]
+        y_box = [ymin, ymin, ymax, ymax, ymin]
+        
+        # Dynamically thin lines for deeper levels so the plot remains clean
+        linewidth = max(0.5, 2.5 - 0.5 * depth)
+        ax.plot(x_box, y_box, color='red', linewidth=linewidth, alpha=0.8)
+    
+    ax.set_title(f'Adaptive Quadtree Grid (Global Training Grid Method)\nThreshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
+    ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
+    ax.grid(False)
+    plt.show()
+    
+    # Extract and save the unique node corners 
+    unique_corners = set()
+    
+    for xmin, xmax, ymin, ymax, depth in boxes:
+        unique_corners.add((xmin, ymin)) # Bottom-Left
+        unique_corners.add((xmax, ymin)) # Bottom-Right
+        unique_corners.add((xmin, ymax)) # Top-Left
+        unique_corners.add((xmax, ymax)) # Top-Right
+    
+    # Convert the unique coordinates into a structured NumPy array
+    nodes_array = np.array(list(unique_corners))
+    
+    # Compute the function evaluation at each unique mesh node corner
+    node_vals = test_func(nodes_array[:, 0], nodes_array[:, 1])
+    
+    # Construct the uniform-equivalent Dataframe
+    df_points = pd.DataFrame({
+        'X': nodes_array[:, 0],
+        'Y': nodes_array[:, 1],
+        'F': node_vals
+    })
+    
+    # Save the final table to your directory
+    csv_dir = f"tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv"
+    df_points.to_csv(csv_dir, index=False)
+    
+    print(f"Saved quadtree vertices table to: {csv_dir}")
+    
+    # --- Demonstrate evaluation at random points ---
+    print("\n--- Quadtree Evaluation Examples ---")
+    test_points = np.random.rand(5, 2)
+    for x, y in test_points:
+        try:
+            pred = quadtree_root.evaluate(x, y)
+            true = test_func(x, y)
+            error = abs(pred - true)
+            print(f"  Point ({x:.4f}, {y:.4f}): Predicted={pred:.6f}, True={true:.6f}, Error={error:.2e}")
+        except Exception as e:
+            print(f"  Point ({x:.4f}, {y:.4f}): Error - {e}")
