@@ -96,6 +96,7 @@ class QuadTreeNode:
             depth += 1
             node = list(node.children.values())[0]
         return depth
+    
     def _flatten_to_list(self, nodes_list, node_index_map):
         """Flatten tree to a list for storage."""
         node_id = len(nodes_list)
@@ -296,7 +297,7 @@ def load_quadtree(filepath):
 if __name__ == "__main__":
     DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
     DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-    ERROR_THRESHOLD = 1e-5
+    ERROR_THRESHOLD = 1e-4
     MAX_DEPTH = 7
     
     # Define the Global Uniform Training Grid
@@ -312,37 +313,38 @@ if __name__ == "__main__":
     quadtree_root = build_quadtree(DOMAIN_XMIN, DOMAIN_XMAX, DOMAIN_YMIN, DOMAIN_YMAX, 
                                     ERROR_THRESHOLD, MAX_DEPTH, global_points, None)
     
-    # # Extract leaf cells for visualization
-    # boxes = quadtree_root.get_leaf_cells()
+    # Extract leaf cells for visualization
+    boxes = quadtree_root.get_leaf_cells()
     
-    # # --- Generate High-Res Background Heatmap ---
-    # x_bg = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, 400)
-    # y_bg = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, 400)
-    # X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing='ij')
-    # Z_bg = test_func(X_bg, Y_bg)
+    # --- Generate High-Res Background Heatmap ---
+    x_bg = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, 400)
+    y_bg = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, 400)
+    X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing='ij')
+    Z_bg = test_func(X_bg, Y_bg)
     
-    # # --- Plotting Layout ---
-    # fig, ax = plt.subplots(figsize=(10, 8))
+    # --- Plotting Layout ---
+    fig, ax = plt.subplots(figsize=(10, 8))
     
-    # # Plot underlying function data as a background heatmap
-    # pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap='viridis', shading='auto', alpha=0.75)
-    # fig.colorbar(pc, ax=ax, label='f(x, y) Value')
+    # Plot underlying function data as a background heatmap
+    pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap='viridis', shading='auto', alpha=0.75)
+    fig.colorbar(pc, ax=ax, label='f(x, y) Value')
     
-    # # Outline each leaf node bounding box
-    # for xmin, xmax, ymin, ymax, depth in boxes:
-    #     x_box = [xmin, xmax, xmax, xmin, xmin]
-    #     y_box = [ymin, ymin, ymax, ymax, ymin]
+    # Outline each leaf node bounding box
+    for xmin, xmax, ymin, ymax, depth in boxes:
+        x_box = [xmin, xmax, xmax, xmin, xmin]
+        y_box = [ymin, ymin, ymax, ymax, ymin]
         
-    #     # Dynamically thin lines for deeper levels so the plot remains clean
-    #     linewidth = max(0.5, 2.5 - 0.5 * depth)
-    #     ax.plot(x_box, y_box, color='red', linewidth=linewidth, alpha=0.8)
+        # Dynamically thin lines for deeper levels so the plot remains clean
+        linewidth = max(0.5, 2.5 - 0.5 * depth)
+        ax.plot(x_box, y_box, color='red', linewidth=linewidth, alpha=0.8)
     
-    # ax.set_title(f'Adaptive Quadtree Grid (Global Training Grid Method)\nThreshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}')
-    # ax.set_xlabel('X')
-    # ax.set_ylabel('Y')
-    # ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
-    # ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
-    # ax.grid(False)
+    ax.set_title(f'Adaptive Quadtree Grid (Global Training Grid Method)\nThreshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_xlim(DOMAIN_XMIN, DOMAIN_XMAX)
+    ax.set_ylim(DOMAIN_YMIN, DOMAIN_YMAX)
+    ax.grid(False)
+    plt.savefig("figs/quadtree_grid.png", dpi=300)
     # plt.show()
     
     # Save the complete quadtree structure
