@@ -8,7 +8,7 @@ Currently using a cubic-spline interpolation method for training and testing.
 ### Python Scripts
 - `quadtree_toy.py`: Generates quadtree CSV file (`tables/quadtree_points_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.csv`) with x-points, y-points, and their cooresponding function evaluations.
 
--`load_and_use_table.py`: Loads in the `.npz` file and computes the error. Saves a CSV file and two plots. 
+- `load_and_use_table.py`: Loads in the `.npz` file and computes the error. Saves a CSV file and two plots. 
 
 - OUTDATED - `test_func_eval.py`: Evaluates the test function on a uniform grid, plots, and exports a CSV with (`tables/uniform_evaluations-{resolution}.csv`) x-points, y-points, and their cooresponding function evaluations (same format as quadtree CSV)
 
