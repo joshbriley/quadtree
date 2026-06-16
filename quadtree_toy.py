@@ -4,38 +4,43 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from scipy.interpolate import CloughTocher2DInterpolator
 
+"""
+Build a quadtree to achieve a global error across the domain using a cubic spline interpolant and a given test function. Store the quadtree s.t. it can be traversed, loaded, and interpolated easily in-stitu as a surrogate for expensive functions. 
+"""
 
 # Function we are trying to emulate
 def test_func(x, y):
     return np.sin(x * y) + 1.0 / (1.0 + np.exp(-100*(x - y)))
 
-# Compute Training error
+# Compute Training error and export interpolation polynomials
 def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
 
-    # Evaluate training error
-    num_of_points = 3 # minimum of 2
+    num_of_points = 4 # minimum of 2
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
 
-    # X_c, Y_c = np.meshgrid(x_grid, y_grid, indexing='ij')
+    # Create mesh
     x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing='ij')
     corner_vals = test_func(x_mesh, y_mesh)
     points_input = np.column_stack((x_mesh.flatten(), y_mesh.flatten()))
     values_input = corner_vals.flatten()
 
-    # interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method='cubic')
-    interp_func = CloughTocher2DInterpolator(points_input, values_input) 
+    # Build interpolant
+    interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method='cubic')
+    interp_func_spline = interp_func._spline
+    coeffs = interp_func_spline.c
+    # interp_func = CloughTocher2DInterpolator(points_input, values_input) 
 
-    # Predict values for the internal global training points
+    # Extract x & y values from uniform grid
     x_coords = global_points[:, 0]
     y_coords = global_points[:, 1]
 
-    # Create a boolean mask for points inside the cell
+    # Create a boolean mask for points only inside the cell
     mask = (x_coords >= xmin) & (x_coords <= xmax) & (y_coords >= ymin) & (y_coords <= ymax)
 
     # Filter the global points for only points in the current cell
-    quad_pts = global_points[mask]
-    if quad_pts.shape[0] == 0:
+    testing_pts = global_points[mask]
+    if testing_pts.shape[0] == 0:
         raise ValueError(
             f"No global training points found in the current cell!\n"
             f"Cell Boundaries:\n"
@@ -44,25 +49,24 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
             f"Hint: The max depth might be too deep or the error threshold too small for your global "
             f"TRAIN_RESOLUTION, causing cells to become smaller than the grid spacing."
         )
-    interp_vals = interp_func(quad_pts)
-    quad_true_vals = test_func(quad_pts[:, 0], quad_pts[:, 1])
+    interp_vals = interp_func(testing_pts)
+    quad_true_vals = test_func(testing_pts[:, 0], testing_pts[:, 1])
     
     # Compute Absolute Error Norm
     err = np.abs(interp_vals - quad_true_vals)
     linfy_norm = np.max(err)
-    return linfy_norm 
+    return linfy_norm, coeffs 
 
 def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, global_vals, fig_index, current_depth=0, leaf_boxes=None):
-    if leaf_boxes is None:
-        leaf_boxes = []
+    if quad_data is None:
+        quad_data = []
 
-    global quad_error 
     # Calculate error based on the global grid subset
-    quad_error = evaluate_quad_error(xmin, xmax, ymin, ymax, global_points)
+    quad_error, coeffs = evaluate_quad_error(xmin, xmax, ymin, ymax, global_points)
 
     # Base Cases
     if quad_error <= threshold or current_depth >= max_depth:
-        leaf_boxes.append((xmin, xmax, ymin, ymax, current_depth))
+        quad_data.append((xmin, xmax, ymin, ymax, current_depth))
         # print(f"Quad error: {quad_error}\nCurrent depth: {current_depth}")
         return leaf_boxes
 
@@ -80,16 +84,16 @@ def build_quadtree(xmin, xmax, ymin, ymax, threshold, max_depth, global_points, 
     for c_xmin, c_xmax, c_ymin, c_ymax in children:
         build_quadtree(c_xmin, c_xmax, c_ymin, c_ymax, threshold, max_depth, 
                        global_points, global_vals, fig_index, current_depth + 1, leaf_boxes)
-    return leaf_boxes
+    return quad_data
 
 ## === Execute Algorithm === ##
-DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
-DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
+DOMAIN_XMIN, DOMAIN_XMAX = 0, 1.0
+DOMAIN_YMIN, DOMAIN_YMAX = 0, 1.0
 ERROR_THRESHOLD = 1e-2
-MAX_DEPTH = 7 
+MAX_DEPTH = 3 
 
 # Define the Global Uniform Training Grid
-TRAIN_RESOLUTION = 500 
+TRAIN_RESOLUTION = 128 
 x_train_global = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TRAIN_RESOLUTION)
 y_train_global = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TRAIN_RESOLUTION)
 X_train_g, Y_train_g = np.meshgrid(x_train_global, y_train_global, indexing='ij')
