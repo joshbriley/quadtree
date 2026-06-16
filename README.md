@@ -32,7 +32,6 @@ The current workflow does not require knowing the original analytical function. 
 	- Useful for creating source data when you do not already have a table during testing. 
 
 ## Legacy / Older Utilities
-- `test_func_eval.py`: Older utility for generating/evaluating a function-based uniform table.
 - `evaluate_norms.py`: Older norm-evaluation utility based on direct CSV interpolation.
 
 These are retained for reference but are not the primary pipeline.
