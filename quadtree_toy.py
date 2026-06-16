@@ -1,9 +1,8 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import h5py
 from scipy.interpolate import RegularGridInterpolator
-from scipy.interpolate import CloughTocher2DInterpolator
+# from scipy.interpolate import CloughTocher2DInterpolator
 
 """
 Build a quadtree to achieve a global error across the domain using a cubic spline interpolant and a given test function. Store the quadtree s.t. it can be traversed, loaded, and interpolated easily in-stitu as a surrogate for expensive functions. 
@@ -23,13 +22,11 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
     # Create mesh
     x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing='ij')
     corner_vals = test_func(x_mesh, y_mesh)
-    points_input = np.column_stack((x_mesh.flatten(), y_mesh.flatten()))
-    values_input = corner_vals.flatten()
+    # points_input = np.column_stack((x_mesh.flatten(), y_mesh.flatten()))
+    # values_input = corner_vals.flatten()
 
     # Build interpolant
     interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method='cubic')
-    interp_func_spline = interp_func._spline
-    coeffs = interp_func_spline.c
     # interp_func = CloughTocher2DInterpolator(points_input, values_input) 
 
     # Extract x & y values from uniform grid
@@ -42,21 +39,14 @@ def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points):
     # Filter the global points for only points in the current cell
     testing_pts = global_points[mask]
     if testing_pts.shape[0] == 0:
-        raise ValueError(
-            f"No global training points found in the current cell!\n"
-            f"Cell Boundaries:\n"
-            f"  X: [{xmin}, {xmax}]\n"
-            f"  Y: [{ymin}, {ymax}]\n"
-            f"Hint: The max depth might be too deep or the error threshold too small for your global "
-            f"TRAIN_RESOLUTION, causing cells to become smaller than the grid spacing."
-        )
+        raise ValueError("No points found in cell for error evaluation.")
     interp_vals = interp_func(testing_pts)
     quad_true_vals = test_func(testing_pts[:, 0], testing_pts[:, 1])
     
     # Compute Absolute Error Norm
     err = np.abs(interp_vals - quad_true_vals)
     linfy_norm = np.max(err)
-    return linfy_norm, coeffs 
+    return linfy_norm, corner_vals 
 
 class QuadTreeNode:
     """Stores a quadtree cell with splitting point and polynomial coefficients."""
@@ -152,25 +142,17 @@ class QuadTreeNode:
         return nodes[0] if nodes else None
 
 
-def evaluate_polynomial(coeffs, x, y, bounds):
+def evaluate_polynomial(vals, x, y, bounds):
     """Evaluate cubic spline polynomial at (x, y) within cell bounds."""
     xmin, xmax, ymin, ymax = bounds
     
-    # Normalize coordinates to [0, 1]
-    x_norm = (x - xmin) / (xmax - xmin)
-    y_norm = (y - ymin) / (ymax - ymin)
+    # Reconstruct the interpolator with original function values at grid corners
+    x_corner = np.linspace(xmin, xmax, 4)
+    y_corner = np.linspace(ymin, ymax, 4)
     
-    # Evaluate using scipy's RegularGridInterpolator evaluation
-    # The coefficients are stored in a specific format from RegularGridInterpolator
-    # We evaluate the cubic spline directly
-    from scipy.interpolate import RegularGridInterpolator
-    
-    # For simplicity, reconstruct evaluator using stored coefficients
-    x_pts = np.linspace(0, 1, 4)
-    y_pts = np.linspace(0, 1, 4)
-    
-    interp = RegularGridInterpolator((x_pts, y_pts), coeffs.reshape(4, 4), method='cubic')
-    return float(interp([[x_norm, y_norm]])[0])
+    # vals contains the function values at the 4x4 grid points
+    interp = RegularGridInterpolator((x_corner, y_corner), vals.reshape(4, 4), method='cubic')
+    return float(interp([[x, y]])[0])
 
 
 # Quadtree Builder -- Must be able to export the quadtree structure and the interpolation polynomials at each leaf node for in-situ surrogate evaluation.
@@ -243,11 +225,11 @@ def save_quadtree(quadtree_root, filepath):
         ]
         child_indices_list.append(indices)
     
-    # Collect coefficients (some nodes have None)
-    coefficients_dict = {}
+    # Collect function values (some nodes have None)
+    values_dict = {}
     for i, node_data in enumerate(nodes_list):
         if node_data['coefficients'] is not None:
-            coefficients_dict[f'coeff_{i}'] = node_data['coefficients']
+            values_dict[f'vals_{i}'] = node_data['coefficients']
     
     # Save as NPZ with compression
     np.savez_compressed(
@@ -258,7 +240,7 @@ def save_quadtree(quadtree_root, filepath):
         is_leaf=np.array(is_leaf_list, dtype=bool),
         split_points=np.array(split_points_list, dtype=np.float32),
         child_indices=np.array(child_indices_list, dtype=np.int32),
-        **coefficients_dict
+        **values_dict
     )
     print(f"Saved quadtree to: {filepath}")
 
@@ -282,7 +264,7 @@ def load_quadtree(filepath):
             'bounds': tuple(bounds_list[i]),
             'is_leaf': bool(is_leaf_list[i]),
             'split_point': tuple(split_points_list[i]) if not is_leaf_list[i] else None,
-            'coefficients': data[f'coeff_{i}'] if f'coeff_{i}' in data else None,
+            'coefficients': data[f'vals_{i}'] if f'vals_{i}' in data else None,
             'child_indices': {}
         }
         nodes_list.append(node_data)
@@ -308,12 +290,13 @@ def load_quadtree(filepath):
         if sw_idx >= 0:
             nodes[i].children['SW'] = nodes[sw_idx]
     
-    print(f"Loaded quadtree from: {filepath}")
+    # print(f"Loaded quadtree from: {filepath}")
     return nodes[0] if nodes else None
+
 if __name__ == "__main__":
     DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
     DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-    ERROR_THRESHOLD = 1e-4
+    ERROR_THRESHOLD = 1e-5
     MAX_DEPTH = 7
     
     # Define the Global Uniform Training Grid
@@ -363,30 +346,6 @@ if __name__ == "__main__":
     # plt.show()
     
     # Save the complete quadtree structure
-    quadtree_file = f"tables/quadtree_CT-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.npz"
+    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{TRAIN_RESOLUTION}.npz"
     save_quadtree(quadtree_root, quadtree_file)
     
-    # # --- Demonstrate evaluation at random points ---
-    # print("\n--- Quadtree Evaluation Examples ---")
-    test_points = np.random.rand(5, 2)
-    # for x, y in test_points:
-    #     try:
-    #         pred = quadtree_root.evaluate(x, y)
-    #         true = test_func(x, y)
-    #         error = abs(pred - true)
-    #         print(f"  Point ({x:.4f}, {y:.4f}): Predicted={pred:.6f}, True={true:.6f}, Error={error:.2e}")
-    #     except Exception as e:
-    #         print(f"  Point ({x:.4f}, {y:.4f}): Error - {e}")
-    
-    # --- Demonstrate loading the quadtree from file ---
-    print("\n--- Loading Quadtree from File ---")
-    loaded_quadtree = load_quadtree(quadtree_file)
-    print("Loaded quadtree successfully!")
-    
-    # Verify loaded tree works
-    print("\n--- Verification with Loaded Tree ---")
-    for x, y in test_points[:2]:
-        pred = loaded_quadtree.evaluate(x, y)
-        true = test_func(x, y)
-        error = abs(pred - true)
-        print(f"  Point ({x:.4f}, {y:.4f}): Predicted={pred:.6f}, True={true:.6f}, Error={error:.2e}\n---")
