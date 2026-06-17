@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import warnings
 from scipy.interpolate import RegularGridInterpolator
 
 """
@@ -9,7 +10,7 @@ to the underlying analytical function that produced the table.
 """
 
 SOURCE_TABLE_FILE = "tables/uniform_grid_func_evals/uniform_evaluations-128.csv"
-ERROR_THRESHOLD = 1e-4
+ERROR_THRESHOLD = 1e-1
 MAX_DEPTH = 7
 
 _DEFAULT_SOURCE_INTERPOLATOR = None
@@ -45,17 +46,6 @@ def load_uniform_table(csv_path):
 
     return x_coords, y_coords, global_points, global_values, source_interpolator
 
-def test_func(x, y):
-    """Compatibility wrapper for scripts that still import test_func."""
-    if _DEFAULT_SOURCE_INTERPOLATOR is None:
-        raise RuntimeError("No source table is loaded. Call load_uniform_table(...) first.")
-
-    x_arr, y_arr = np.broadcast_arrays(np.asarray(x), np.asarray(y))
-    sample_points = np.column_stack((x_arr.ravel(), y_arr.ravel()))
-    sampled = _DEFAULT_SOURCE_INTERPOLATOR(sample_points).reshape(x_arr.shape)
-    if sampled.shape == ():
-        return float(sampled)
-    return sampled
 
 def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points, global_values, source_interpolator):
     num_of_points = 4
@@ -217,9 +207,23 @@ def build_quadtree(
             source_interpolator,
         )
     except ValueError:
-        # No points in cell, mark as leaf anyway
+        # No table samples fell inside this cell. Warn and fall back to the
+        # source interpolator at the cell corners so the leaf remains usable.
+        warnings.warn(
+            (
+                "No points found in cell "
+                f"({xmin}, {xmax}, {ymin}, {ymax}); using corner values "
+                "from the source interpolator."
+            ),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        x_corner = np.linspace(xmin, xmax, 4)
+        y_corner = np.linspace(ymin, ymax, 4)
+        x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
+        corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
         node.is_leaf = True
-        node.coefficients = np.zeros((4, 4))
+        node.coefficients = source_interpolator(corner_points).reshape(4, 4)
         return node
     
     # Check stopping criteria
@@ -375,33 +379,35 @@ if __name__ == "__main__":
         source_interpolator,
     )
 
-    boxes = quadtree_root.get_leaf_cells()
+    # boxes = quadtree_root.get_leaf_cells()
 
-    x_bg = np.linspace(domain_xmin, domain_xmax, 400)
-    y_bg = np.linspace(domain_ymin, domain_ymax, 400)
-    X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing="ij")
-    Z_bg = test_func(X_bg, Y_bg)
+    # x_bg = np.linspace(domain_xmin, domain_xmax, 400)
+    # y_bg = np.linspace(domain_ymin, domain_ymax, 400)
+    # X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing="ij")
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap="viridis", shading="auto", alpha=0.75)
-    fig.colorbar(pc, ax=ax, label="table value")
+    # test_func = lambda x, y: np.tanh(x * y)
+    # Z_bg = test_func(X_bg, Y_bg)
 
-    for xmin, xmax, ymin, ymax, depth in boxes:
-        x_box = [xmin, xmax, xmax, xmin, xmin]
-        y_box = [ymin, ymin, ymax, ymax, ymin]
-        linewidth = max(0.5, 2.5 - 0.5 * depth)
-        ax.plot(x_box, y_box, color="red", linewidth=linewidth, alpha=0.8)
+    # fig, ax = plt.subplots(figsize=(10, 8))
+    # pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap="viridis", shading="auto", alpha=0.75)
+    # fig.colorbar(pc, ax=ax, label="table value")
 
-    ax.set_title(
-        f"Adaptive Quadtree from Uniform Table\n"
-        f"Threshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}"
-    )
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_xlim(domain_xmin, domain_xmax)
-    ax.set_ylim(domain_ymin, domain_ymax)
-    ax.grid(False)
-    plt.savefig("figs/quadtree_grid.png", dpi=300)
+    # for xmin, xmax, ymin, ymax, depth in boxes:
+    #     x_box = [xmin, xmax, xmax, xmin, xmin]
+    #     y_box = [ymin, ymin, ymax, ymax, ymin]
+    #     linewidth = max(0.5, 2.5 - 0.5 * depth)
+    #     ax.plot(x_box, y_box, color="red", linewidth=linewidth, alpha=0.8)
+
+    # ax.set_title(
+    #     f"Adaptive Quadtree from Uniform Table\n"
+    #     f"Threshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}"
+    # )
+    # ax.set_xlabel("X")
+    # ax.set_ylabel("Y")
+    # ax.set_xlim(domain_xmin, domain_xmax)
+    # ax.set_ylim(domain_ymin, domain_ymax)
+    # ax.grid(False)
+    # plt.savefig("figs/quadtree_grid.png", dpi=300)
 
     quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
     save_quadtree(quadtree_root, quadtree_file)

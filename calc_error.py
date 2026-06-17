@@ -4,27 +4,27 @@ import csv
 import matplotlib.pyplot as plt
 from build_quadtree import load_quadtree
 
-# def test_func(x, y):
-#     return np.sin(x * y) + 1.0 / (1.0 + np.exp(-100*(x - y)))
-
 def test_func(x, y):
-    return np.tanh(x * y)
+    return np.sin(x * y) + 1.0 / (1.0 + np.exp(-100*(x - y)))
+
+# def test_func(x, y):
+#     return np.tanh(x * y)
 
 # --- Configuration ---
 DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
 DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
 TEST_RESOLUTION = 300
 QUADTREE_FILES = [
-    # "tables/quadtree-7-1e-05-256.npz", 
+    "tables/quadtree-7-1e-05-128.npz", 
     "tables/quadtree-7-0.0001-128.npz",
-    "tables/quadtree-7-0.001-256.npz",
-    "tables/quadtree-7-0.01-256.npz",
-    "tables/quadtree-7-0.1-256.npz",
-    "tables/quadtree-9-1e-05-256.npz", 
-    "tables/quadtree-9-0.0001-256.npz",
-    "tables/quadtree-9-0.001-256.npz",
-    "tables/quadtree-9-0.01-256.npz",
-    "tables/quadtree-9-0.1-256.npz",
+    "tables/quadtree-7-0.001-128.npz",
+    "tables/quadtree-7-0.01-128.npz",
+    "tables/quadtree-7-0.1-128.npz",
+    # "tables/quadtree-9-1e-05-256.npz", 
+    # "tables/quadtree-9-0.0001-256.npz",
+    # "tables/quadtree-9-0.001-256.npz",
+    # "tables/quadtree-9-0.01-256.npz",
+    # "tables/quadtree-9-0.1-256.npz",
 ]
 
 OUTPUT_CSV = "tables/quadtree_norm_size_comparison.csv"
