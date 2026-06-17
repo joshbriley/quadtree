@@ -19,7 +19,7 @@ The current workflow does not require knowing the original analytical function. 
 		- tree archive: `tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{resolution}.npz`
 		- grid visualization: `figs/quadtree_grid.png`
 
-- `load_and_use_table.py`
+- `calc_error.py`
 	- Loads one or more saved quadtree `.npz` files.
 	- Evaluates full-domain norms on a structured test grid based on a user-specified resolution and assumption of the original function.
 	- Saves:
@@ -50,7 +50,7 @@ The table should represent a rectangular uniform grid.
 2. Build quadtree from the table:
 	 - `python build_quadtree.py`
 3. Evaluate saved trees and generate comparison artifacts:
-	 - `python load_and_use_table.py`
+	 - `python calc_error.py`
 
 ## Notes
 - Domain bounds, error thresholds, depth limits, and file lists are configured directly in each script.

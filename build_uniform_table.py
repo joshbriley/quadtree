@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 1. Define resolution
-resolution = 128 
+resolution = 128
 x_pts = np.linspace(-2, 2, resolution)
 y_pts = np.linspace(-2, 2, resolution)
 
@@ -13,10 +13,10 @@ y_pts = np.linspace(-2, 2, resolution)
 X, Y = np.meshgrid(x_pts, y_pts, indexing='ij')
 
 # Evaluate the 2D function
-# func_grid = np.sin(X*Y) + 1.0/(1.0 + np.exp(-100*(X - Y)))
+func_grid = np.sin(X*Y) + 1.0/(1.0 + np.exp(-100*(X - Y)))
 
 # Use a 2-dimensional tanh as a smoother function 
-func_grid = np.tanh(X*Y)
+# func_grid = np.tanh(X*Y)
 
 # ## ------------------------- ##
 # # --- Plot 1: 2D Heatmap ---
