@@ -1,135 +1,112 @@
 import numpy as np
+import h5py
 import os
-import csv
-import matplotlib.pyplot as plt
+from scipy.interpolate import LinearNDInterpolator
 from build_quadtree import load_quadtree
 
-# def test_func(x, y):
-#     return np.sin(x * y) + 1.0 / (1.0 + np.exp(-100*(x - y)))
 
-def test_func(x, y):
-    return np.tanh(x * y)
+# --------------------------------------------------
+# Load fine reference data
+# --------------------------------------------------
+def load_reference_hdf5(file_path):
+    with h5py.File(file_path, "r") as f:
+        print("Reference fields:", list(f["Table_Values"].keys()))
 
-# --- Configuration ---
-DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
-DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-TEST_RESOLUTION = 300
-QUADTREE_FILES = [
-    "tables/quadtree-7-1.0e-05-128.npz", 
-    "tables/quadtree-7-1.0e-04-128.npz",
-    "tables/quadtree-7-1.0e-03-128.npz",
-    "tables/quadtree-7-1.0e-02-128.npz",
-    "tables/quadtree-7-1.0e-01-128.npz",
-    # "tables/quadtree-9-1e-05-256.npz", 
-    # "tables/quadtree-9-0.0001-256.npz",
-    # "tables/quadtree-9-0.001-256.npz",
-    # "tables/quadtree-9-0.01-256.npz",
-    # "tables/quadtree-9-0.1-256.npz",
-]
+        X = f["den"][:]    
+        Y = f["temp"][:]   
+        F = f["Table_Values"]["f"][:]
 
-OUTPUT_CSV = "tables/quadtree_norm_size_comparison.csv"
-OUTPUT_SCATTER_PNG = "figs/quadtree_norm_vs_size.png"
-OUTPUT_BAR_PNG = "figs/quadtree_norms_by_file.png"
+    ref_points = np.column_stack([X.ravel(), Y.ravel()])
+    ref_values = F.ravel()
+
+    print("Building reference interpolator...")
+    ref_interp = LinearNDInterpolator(ref_points, ref_values)
+
+    return ref_points, ref_values, ref_interp
 
 
-def calculate_norms_for_quadtree(quadtree_file, x_test, y_test, true_vals):
-    loaded_quadtree = load_quadtree(quadtree_file)
-    interp_vals = np.empty_like(true_vals, dtype=float)
+# --------------------------------------------------
+# Error computation
+# --------------------------------------------------
+def calculate_norms_for_quadtree(quadtree_file, ref_interp, x_test, y_test):
+    """
+    Compare quadtree approximation to fine-table interpolant.
+    """
+
+    tree = load_quadtree(quadtree_file)
+
+    nx = len(x_test)
+    ny = len(y_test)
+
+    qt_vals = np.empty((nx, ny))
+    ref_vals = np.empty((nx, ny))
 
     for i, x in enumerate(x_test):
         for j, y in enumerate(y_test):
-            interp_vals[i, j] = loaded_quadtree.evaluate(x, y)
 
-    abs_error = np.abs(interp_vals - true_vals)
-    l1_norm = np.mean(abs_error)
-    l2_norm = np.sqrt(np.mean(abs_error**2))
-    linf_norm = np.max(abs_error)
-    table_size_kb = os.path.getsize(quadtree_file) / 1000.0
-    return l1_norm, l2_norm, linf_norm, table_size_kb
+            qt_vals[i, j] = tree.evaluate(x, y)
 
+            ref_val = ref_interp(x, y)
 
-def main():
-    x_test = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TEST_RESOLUTION)
-    y_test = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TEST_RESOLUTION)
-    X_test, Y_test = np.meshgrid(x_test, y_test, indexing="ij")
-    true_vals = test_func(X_test, Y_test)
+            # handle outside convex hull (rare)
+            if np.isnan(ref_val):
+                ref_val = 0.0
 
-    print("\n--- Full-Domain Norms vs Table Size ---")
-    print(f"Grid Resolution: {TEST_RESOLUTION} x {TEST_RESOLUTION}")
-    print("file | size_kb | L1 | L2 | L_inf")
-    print("-----|---------|----|----|------")
+            ref_vals[i, j] = ref_val
 
-    results = []
+    # --------------------------------------------------
+    # Compute errors
+    # --------------------------------------------------
+    err = np.abs(qt_vals - ref_vals)
 
-    for quadtree_file in QUADTREE_FILES:
-        # print(f"Evaluating {os.path.basename(quadtree_file)}...")
-        l1_norm, l2_norm, linf_norm, table_size_kb = calculate_norms_for_quadtree(
-            quadtree_file, x_test, y_test, true_vals
-        )
-        file_name = os.path.basename(quadtree_file)
-        results.append({
-            "file": file_name,
-            "size_kb": table_size_kb,
-            "L1": l1_norm,
-            "L2": l2_norm,
-            "L_inf": linf_norm,
-        })
-        print(
-            f"{file_name} | "
-            f"{table_size_kb:.2f} | "
-            f"{l1_norm:.6e} | {l2_norm:.6e} | {linf_norm:.6e}"
-        )
+    l1 = np.mean(err)
+    l2 = np.sqrt(np.mean(err**2))
+    linf = np.max(err)
 
-    os.makedirs("tables", exist_ok=True)
-    os.makedirs("figs", exist_ok=True)
+    size_kb = os.path.getsize(quadtree_file) / 1000.0
 
-    with open(OUTPUT_CSV, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["file", "size_kb", "L1", "L2", "L_inf"])
-        writer.writeheader()
-        writer.writerows(results)
-
-    sizes = np.array([r["size_kb"] for r in results])
-    l1_vals = np.array([r["L1"] for r in results])
-    l2_vals = np.array([r["L2"] for r in results])
-    linf_vals = np.array([r["L_inf"] for r in results])
-    labels = [r["file"] for r in results]
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.scatter(sizes, l1_vals, label="L1", marker="o")
-    ax.scatter(sizes, l2_vals, label="L2", marker="s")
-    ax.scatter(sizes, linf_vals, label="L_inf", marker="^")
-    ax.set_xlabel("Table Size (kB)")
-    ax.set_ylabel("Norm Value")
-    ax.set_yscale("log")
-    ax.set_title("Norm vs Table Size")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(OUTPUT_SCATTER_PNG, dpi=200)
-    plt.close(fig)
-
-    x_idx = np.arange(len(labels))
-    width = 0.25
-    fig, ax = plt.subplots(figsize=(14, 6))
-    ax.bar(x_idx - width, l1_vals, width, label="L1")
-    ax.bar(x_idx, l2_vals, width, label="L2")
-    ax.bar(x_idx + width, linf_vals, width, label="L_inf")
-    ax.set_xticks(x_idx)
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.set_yscale("log")
-    ax.set_ylabel("Norm Value")
-    ax.set_title("Norms by Quadtree Table")
-    ax.grid(True, axis="y", alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(OUTPUT_BAR_PNG, dpi=200)
-    plt.close(fig)
-
-    print(f"Saved CSV: {OUTPUT_CSV}")
-    print(f"Saved plot: {OUTPUT_SCATTER_PNG}")
-    print(f"Saved plot: {OUTPUT_BAR_PNG}")
-    print("---")
+    return l1, l2, linf, size_kb
 
 
+# --------------------------------------------------
+# Example main (optional)
+# --------------------------------------------------
 if __name__ == "__main__":
-    main()
+
+    # --------------------------------------------
+    # Config
+    # --------------------------------------------
+    REF_FILE = "fine_reference_data.hdf5"
+    TREE_FILE = "tables/quadtree-7-1e-3.npz"
+
+    TEST_RESOLUTION = 200
+
+    # --------------------------------------------
+    # Load reference table
+    # --------------------------------------------
+    ref_points, ref_values, ref_interp = load_reference_hdf5(REF_FILE)
+
+    xmin, xmax = ref_points[:,0].min(), ref_points[:,0].max()
+    ymin, ymax = ref_points[:,1].min(), ref_points[:,1].max()
+
+    # --------------------------------------------
+    # Build evaluation grid
+    # --------------------------------------------
+    x_test = np.linspace(xmin, xmax, TEST_RESOLUTION)
+    y_test = np.linspace(ymin, ymax, TEST_RESOLUTION)
+
+    # --------------------------------------------
+    # Compute error
+    # --------------------------------------------
+    l1, l2, linf, size_kb = calculate_norms_for_quadtree(
+        TREE_FILE,
+        ref_interp,
+        x_test,
+        y_test
+    )
+
+    print("\n--- Quadtree Error ---")
+    print(f"L1   : {l1:.3e}")
+    print(f"L2   : {l2:.3e}")
+    print(f"Linf : {linf:.3e}")
+    print(f"Size : {size_kb:.2f} kB")
