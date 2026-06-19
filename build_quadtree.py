@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import sys
+import polyinterp 
 from scipy.interpolate import RegularGridInterpolator
 
 """
@@ -87,7 +88,7 @@ def evaluate_quad_error(
     # Step 3: evaluate polynomial (FIXED PART)
     # --------------------------------------------------
     interp_vals = np.array([
-        evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
+        polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
         for x, y in testing_pts
     ])
 
@@ -114,7 +115,7 @@ class QuadTreeNode:
         if self.is_leaf:
             if self.coefficients is None:
                 raise ValueError("Leaf node has no coefficients")
-            return evaluate_polynomial(self.coefficients, x, y, self.bounds)
+            return polyinterp.evaluate_polynomial(self.coefficients, x, y, self.bounds)
         
         # Navigate to correct child quadrant
         xmin, xmax, ymin, ymax = self.bounds
@@ -170,44 +171,6 @@ class QuadTreeNode:
             child_indices[key] = child._flatten_to_list(nodes_list, node_index_map)
         
         return node_id
-
-def evaluate_polynomial(vals, x, y, bounds):
-    """
-    Fast evaluation using tensor-product cubic interpolation (Lagrange basis).
-    
-    vals: (4,4) array of function values on tensor grid
-    bounds: (xmin, xmax, ymin, ymax)
-    """
-    xmin, xmax, ymin, ymax = bounds
-
-    # Normalize to [0, 1]
-    tx = (x - xmin) / (xmax - xmin)
-    ty = (y - ymin) / (ymax - ymin)
-
-    # Fixed nodes in reference space (uniform grid)
-    nodes = np.array([0.0, 1/3, 2/3, 1.0])
-
-    # Compute Lagrange basis in x
-    Lx = np.ones(4)
-    for i in range(4):
-        for j in range(4):
-            if i != j:
-                Lx[i] *= (tx - nodes[j]) / (nodes[i] - nodes[j])
-
-    # Compute Lagrange basis in y
-    Ly = np.ones(4)
-    for i in range(4):
-        for j in range(4):
-            if i != j:
-                Ly[i] *= (ty - nodes[j]) / (nodes[i] - nodes[j])
-
-    # Tensor product evaluation
-    result = 0.0
-    for i in range(4):
-        for j in range(4):
-            result += vals[i, j] * Lx[i] * Ly[j]
-
-    return float(result)
 
 # Quadtree Builder -- Must be able to export the quadtree structure and the interpolation polynomials at each leaf node for in-situ surrogate evaluation.
 def build_quadtree(
