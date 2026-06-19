@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import warnings
+import sys
 from scipy.interpolate import RegularGridInterpolator
 
 """
@@ -12,9 +12,6 @@ to the underlying analytical function that produced the table.
 SOURCE_TABLE_FILE = "tables/uniform_grid_func_evals/uniform_evaluations-128.csv"
 ERROR_THRESHOLD = 1e-1
 MAX_DEPTH = 7
-
-_DEFAULT_SOURCE_INTERPOLATOR = None
-
 
 def load_uniform_table(csv_path):
     df = pd.read_csv(csv_path)
@@ -47,30 +44,60 @@ def load_uniform_table(csv_path):
     return x_coords, y_coords, global_points, global_values, source_interpolator
 
 
-def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points, global_values, source_interpolator):
+def evaluate_quad_error(
+    xmin, xmax, ymin, ymax,
+    global_points, global_values,
+    source_interpolator
+):
+    """
+    Compute error of local polynomial approximation on a cell.
+    """
+
+    # --------------------------------------------------
+    # Step 1: build corner grid (4x4)
+    # --------------------------------------------------
     num_of_points = 4
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
 
     x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
     corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
+
+    # Ground truth at grid nodes (this is fine to keep)
     corner_vals = source_interpolator(corner_points).reshape(num_of_points, num_of_points)
 
-    interp_func = RegularGridInterpolator((x_corner, y_corner), corner_vals, method="cubic")
-
+    # --------------------------------------------------
+    # Step 2: find testing points inside cell
+    # --------------------------------------------------
     x_coords = global_points[:, 0]
     y_coords = global_points[:, 1]
-    mask = (x_coords >= xmin) & (x_coords <= xmax) & (y_coords >= ymin) & (y_coords <= ymax)
+
+    mask = (
+        (x_coords >= xmin) & (x_coords <= xmax) &
+        (y_coords >= ymin) & (y_coords <= ymax)
+    )
 
     testing_pts = global_points[mask]
     testing_vals = global_values[mask]
+
     if testing_pts.shape[0] == 0:
         raise ValueError("No points found in cell for error evaluation.")
 
-    interp_vals = interp_func(testing_pts)
+    # --------------------------------------------------
+    # Step 3: evaluate polynomial (FIXED PART)
+    # --------------------------------------------------
+    interp_vals = np.array([
+        evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
+        for x, y in testing_pts
+    ])
+
+    # --------------------------------------------------
+    # Step 4: compute error
+    # --------------------------------------------------
     err = np.abs(interp_vals - testing_vals)
-    linfy_norm = np.max(err)
-    return linfy_norm, corner_vals
+    linf_norm = np.max(err)
+
+    return linf_norm, corner_vals
 
 class QuadTreeNode:
     """Stores a quadtree cell with splitting point and polynomial coefficients."""
@@ -143,40 +170,44 @@ class QuadTreeNode:
             child_indices[key] = child._flatten_to_list(nodes_list, node_index_map)
         
         return node_id
-    
-    @staticmethod
-    def _unflatten_from_list(nodes_list):
-        """Reconstruct tree from flattened list."""
-        if not nodes_list:
-            return None
-        
-        nodes = []
-        for node_data in nodes_list:
-            node = QuadTreeNode(node_data['bounds'])
-            node.is_leaf = node_data['is_leaf']
-            node.split_point = node_data['split_point']
-            node.coefficients = node_data['coefficients']
-            node._child_indices = node_data.get('child_indices', {})
-            nodes.append(node)
-        
-        for i, node_data in enumerate(nodes_list):
-            for key, child_idx in node_data['child_indices'].items():
-                if child_idx is not None:
-                    nodes[i].children[key] = nodes[child_idx]
-        
-        return nodes[0] if nodes else None
 
 def evaluate_polynomial(vals, x, y, bounds):
-    """Evaluate cubic spline polynomial at (x, y) within cell bounds."""
+    """
+    Fast evaluation using tensor-product cubic interpolation (Lagrange basis).
+    
+    vals: (4,4) array of function values on tensor grid
+    bounds: (xmin, xmax, ymin, ymax)
+    """
     xmin, xmax, ymin, ymax = bounds
-    
-    # Reconstruct the interpolator with original function values at grid corners
-    x_corner = np.linspace(xmin, xmax, 4)
-    y_corner = np.linspace(ymin, ymax, 4)
-    
-    # vals contains the function values at the 4x4 grid points
-    interp = RegularGridInterpolator((x_corner, y_corner), vals.reshape(4, 4), method='cubic')
-    return float(interp([[x, y]])[0])
+
+    # Normalize to [0, 1]
+    tx = (x - xmin) / (xmax - xmin)
+    ty = (y - ymin) / (ymax - ymin)
+
+    # Fixed nodes in reference space (uniform grid)
+    nodes = np.array([0.0, 1/3, 2/3, 1.0])
+
+    # Compute Lagrange basis in x
+    Lx = np.ones(4)
+    for i in range(4):
+        for j in range(4):
+            if i != j:
+                Lx[i] *= (tx - nodes[j]) / (nodes[i] - nodes[j])
+
+    # Compute Lagrange basis in y
+    Ly = np.ones(4)
+    for i in range(4):
+        for j in range(4):
+            if i != j:
+                Ly[i] *= (ty - nodes[j]) / (nodes[i] - nodes[j])
+
+    # Tensor product evaluation
+    result = 0.0
+    for i in range(4):
+        for j in range(4):
+            result += vals[i, j] * Lx[i] * Ly[j]
+
+    return float(result)
 
 # Quadtree Builder -- Must be able to export the quadtree structure and the interpolation polynomials at each leaf node for in-situ surrogate evaluation.
 def build_quadtree(
@@ -187,7 +218,7 @@ def build_quadtree(
     error_threshold,
     max_depth,
     global_points,
-    global_vals,
+    global_valuesuess,
     source_interpolator,
     depth=0,
 ):
@@ -203,28 +234,14 @@ def build_quadtree(
             ymin,
             ymax,
             global_points,
-            global_vals,
+            global_valuesuess,
             source_interpolator,
         )
     except ValueError:
-        # No table samples fell inside this cell. Warn and fall back to the
-        # source interpolator at the cell corners so the leaf remains usable.
-        warnings.warn(
-            (
-                "No points found in cell "
-                f"({xmin}, {xmax}, {ymin}, {ymax}); using corner values "
-                "from the source interpolator."
-            ),
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        x_corner = np.linspace(xmin, xmax, 4)
-        y_corner = np.linspace(ymin, ymax, 4)
-        x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
-        corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
-        node.is_leaf = True
-        node.coefficients = source_interpolator(corner_points).reshape(4, 4)
-        return node
+        # No table samples fell inside this cell.        
+        print("\n" + "+" * 60)
+        print("No points from input table fell in this cell!\nConsider lowering max depth or error threshold, or increase training resolution. Exiting program...")
+        sys.exit("+" * 60)
     
     # Check stopping criteria
     if error <= error_threshold or depth >= max_depth:
@@ -253,7 +270,7 @@ def build_quadtree(
             error_threshold,
             max_depth,
             global_points,
-            global_vals,
+            global_valuesuess,
             source_interpolator,
             depth + 1,
         )
@@ -264,12 +281,6 @@ def save_quadtree(quadtree_root, filepath):
     """Save quadtree to compressed NPZ file using flattened structure."""
     nodes_list = []
     quadtree_root._flatten_to_list(nodes_list, {})
-    
-    # Store metadata and node data separately for efficiency
-    metadata = {
-        'format': 'quadtree_v1',
-        'num_nodes': len(nodes_list)
-    }
     
     # Flatten node data into numpy arrays
     bounds_list = []
@@ -361,7 +372,7 @@ def load_quadtree(filepath):
     return nodes[0] if nodes else None
 
 if __name__ == "__main__":
-    x_coords, y_coords, global_points, global_vals, source_interpolator = load_uniform_table(SOURCE_TABLE_FILE)
+    x_coords, y_coords, global_points, global_values, source_interpolator = load_uniform_table(SOURCE_TABLE_FILE)
     domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
     domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
     train_resolution = len(x_coords)
@@ -375,7 +386,7 @@ if __name__ == "__main__":
         ERROR_THRESHOLD,
         MAX_DEPTH,
         global_points,
-        global_vals,
+        global_values,
         source_interpolator,
     )
 
