@@ -35,9 +35,9 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
     ymin, ymax = float(y_coords.min()), float(y_coords.max())
     resolution = len(x_coords)
 
-    # ----------------------------------------------------------
-    # Build test grid (for error computation)
-    # ----------------------------------------------------------
+    # # ----------------------------------------------------------
+    # # Build test grid (for error computation)
+    # # ----------------------------------------------------------
     print(f"Creating test grid: {test_resolution} x {test_resolution}")
     x_test = np.linspace(xmin, xmax, test_resolution)
     y_test = np.linspace(ymin, ymax, test_resolution)
