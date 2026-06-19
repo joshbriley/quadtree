@@ -62,4 +62,4 @@ The table should represent a rectangular uniform grid.
   - Hemholtz EOS table is the first target, following the paper by J Carlson, S Couch, and B O'Shea. 
 - Eventual comparison to a NN surrogate is planned.
 - The hope is that the memory savings are significant enough to allow the allow the surrogate to run on a GPU. 
-- 
+- When testing, ensure that the function you created the table with (`build_uniform_table.py`) and the function used to calculate the error (`calc_error.py`) are the same. 
