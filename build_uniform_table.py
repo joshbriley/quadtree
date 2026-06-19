@@ -12,11 +12,11 @@ y_pts = np.linspace(-2, 2, resolution)
 # 2. Create a 2D grid for the function evaluation
 X, Y = np.meshgrid(x_pts, y_pts, indexing='ij')
 
-# Evaluate the 2D function
-func_grid = np.sin(X*Y) + 1.0/(1.0 + np.exp(-100*(X - Y)))
+# # Evaluate the 2D function
+# func_grid = np.sin(X*Y) + 1.0/(1.0 + np.exp(-100*(X - Y)))
 
 # Use a 2-dimensional tanh as a smoother function 
-# func_grid = np.tanh(X*Y)
+func_grid = np.tanh(X*Y)
 
 # ## ------------------------- ##
 # # --- Plot 1: 2D Heatmap ---
