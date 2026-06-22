@@ -11,8 +11,10 @@ to the underlying analytical function that produced the table.
 """
 
 SOURCE_TABLE_FILE = "tables/uniform_grid_func_evals/uniform_evaluations-128.csv"
-ERROR_THRESHOLD = 1e-1
-MAX_DEPTH = 7
+ERROR_THRESHOLD = 1e-10
+MIN_POINTS_PER_CELL = 2  # Minimum number of points in a cell to consider splitting
+INPUT_RESOLUTION = 128
+MAX_DEPTH = int(np.log(INPUT_RESOLUTION/MIN_POINTS_PER_CELL) / np.log(2)) # Max depth based on minimum points per cell and initial resolution
 
 def load_uniform_table(csv_path):
     df = pd.read_csv(csv_path)
