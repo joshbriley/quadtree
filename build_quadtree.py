@@ -388,3 +388,6 @@ if __name__ == "__main__":
     quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
     save_quadtree(quadtree_root, quadtree_file)
     
+    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
+    save_quadtree(quadtree_root, quadtree_file)
+    
