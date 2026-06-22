@@ -1,7 +1,12 @@
 import numpy as np
-import h5py
+import pandas as pd
+import matplotlib.pyplot as plt
 import sys
+import polyinterp 
+from scipy.interpolate import RegularGridInterpolator
 from scipy.interpolate import LinearNDInterpolator
+import h5py
+
 
 """
 Adaptive quadtree builder for tabulated (curvilinear) HDF5 data.
@@ -15,7 +20,7 @@ Supports:
 # --------------------------------------------
 # Configuration
 # --------------------------------------------
-SOURCE_TABLE_FILE = "training_data_den0.00625_temp0.00625.hdf5"
+SOURCE_TABLE_FILE = "training_data.hdf5"
 ERROR_THRESHOLD = 1e-1
 MAX_DEPTH = 7
 
@@ -42,326 +47,314 @@ def load_hdf5_table(file_path):
 
     return global_points, global_values, source_interpolator
 
-
-# --------------------------------------------
-# Polynomial evaluation (tensor-product Lagrange)
-# --------------------------------------------
-def lagrange_basis(t, nodes):
-    L = np.ones(4)
-    for i in range(4):
-        for j in range(4):
-            if i != j:
-                L[i] *= (t - nodes[j]) / (nodes[i] - nodes[j])
-    return L
-
-
-def evaluate_polynomial(vals, x, y, bounds):
-    xmin, xmax, ymin, ymax = bounds
-
-    tx = (x - xmin) / (xmax - xmin)
-    ty = (y - ymin) / (ymax - ymin)
-
-    Lx = lagrange_basis(tx, NODES)
-    Ly = lagrange_basis(ty, NODES)
-
-    return float(Lx @ vals @ Ly)
-
-
-# --------------------------------------------
-# Error estimator
-# --------------------------------------------
 def evaluate_quad_error(
     xmin, xmax, ymin, ymax,
     global_points, global_values,
     source_interpolator
 ):
-    num_pts = 4
+    """
+    Compute error of local polynomial approximation on a cell.
+    """
 
-    x_corner = np.linspace(xmin, xmax, num_pts)
-    y_corner = np.linspace(ymin, ymax, num_pts)
+    # --------------------------------------------------
+    # Step 1: build corner grid (4x4)
+    # --------------------------------------------------
+    num_of_points = 4
+    x_corner = np.linspace(xmin, xmax, num_of_points)
+    y_corner = np.linspace(ymin, ymax, num_of_points)
 
     x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
     corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
 
-    # interpolate from scattered data
-    corner_vals = source_interpolator(corner_points)
+    # Ground truth at grid nodes (this is fine to keep)
+    corner_vals = source_interpolator(corner_points).reshape(num_of_points, num_of_points)
 
-    # handle NaNs (outside convex hull)
-    nan_mask = np.isnan(corner_vals)
-    if np.any(nan_mask):
-        corner_vals[nan_mask] = np.mean(global_values)
-
-    corner_vals = corner_vals.reshape(num_pts, num_pts)
-
-    # filter points inside cell
-    gx = global_points[:, 0]
-    gy = global_points[:, 1]
+    # --------------------------------------------------
+    # Step 2: find testing points inside cell
+    # --------------------------------------------------
+    x_coords = global_points[:, 0]
+    y_coords = global_points[:, 1]
 
     mask = (
-        (gx >= xmin) & (gx <= xmax) &
-        (gy >= ymin) & (gy <= ymax)
+        (x_coords >= xmin) & (x_coords <= xmax) &
+        (y_coords >= ymin) & (y_coords <= ymax)
     )
 
     testing_pts = global_points[mask]
     testing_vals = global_values[mask]
 
     if testing_pts.shape[0] == 0:
-        raise ValueError("No points in cell.")
+        raise ValueError("No points found in cell for error evaluation.")
 
-    # evaluate polynomial
-    interp_vals = np.empty(len(testing_pts))
-    for i, (x, y) in enumerate(testing_pts):
-        interp_vals[i] = evaluate_polynomial(
-            corner_vals, x, y, (xmin, xmax, ymin, ymax)
-        )
+    # --------------------------------------------------
+    # Step 3: evaluate polynomial (FIXED PART)
+    # --------------------------------------------------
+    interp_vals = np.array([
+        polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
+        for x, y in testing_pts
+    ])
 
+    # --------------------------------------------------
+    # Step 4: compute error
+    # --------------------------------------------------
     err = np.abs(interp_vals - testing_vals)
-    return np.max(err), corner_vals
+    linf_norm = np.max(err)
 
+    return linf_norm, corner_vals
 
-# --------------------------------------------
-# Quadtree node
-# --------------------------------------------
 class QuadTreeNode:
+    """Stores a quadtree cell with splitting point and polynomial coefficients."""
+    
     def __init__(self, bounds):
-        self.bounds = bounds
-        self.split_point = None
-        self.values = None  # nodal values (NOT coefficients)
-        self.children = {}
+        self.bounds = bounds  # (xmin, xmax, ymin, ymax)
+        self.split_point = None  # (x_mid, y_mid)
+        self.coefficients = None  # Polynomial coeffs if leaf
+        self.children = {}  # {'NE': Node, 'NW': Node, 'SE': Node, 'SW': Node}
         self.is_leaf = False
-
+    
     def evaluate(self, x, y):
+        """Navigate tree and evaluate polynomial at (x, y)."""
         if self.is_leaf:
-            if self.values is None:
-                raise ValueError("Leaf missing values")
-            return evaluate_polynomial(self.values, x, y, self.bounds)
-
+            if self.coefficients is None:
+                raise ValueError("Leaf node has no coefficients")
+            return polyinterp.evaluate_polynomial(self.coefficients, x, y, self.bounds)
+        
+        # Navigate to correct child quadrant
+        xmin, xmax, ymin, ymax = self.bounds
         x_mid, y_mid = self.split_point
-
+        
         if x >= x_mid:
-            key = "NE" if y >= y_mid else "SE"
+            child_key = 'NE' if y >= y_mid else 'SE'
         else:
-            key = "NW" if y >= y_mid else "SW"
-
-        return self.children[key].evaluate(x, y)
-
+            child_key = 'NW' if y >= y_mid else 'SW'
+        
+        return self.children[child_key].evaluate(x, y)
+    
     def get_leaf_cells(self):
+        """Return list of all leaf cells (xmin, xmax, ymin, ymax, depth)."""
         if self.is_leaf:
+            depth = self._compute_depth()
             xmin, xmax, ymin, ymax = self.bounds
-            return [(xmin, xmax, ymin, ymax)]
-
+            return [(xmin, xmax, ymin, ymax, depth)]
+        
         cells = []
         for child in self.children.values():
             cells.extend(child.get_leaf_cells())
         return cells
-
+    
+    def _compute_depth(self):
+        """Compute depth of this node in the tree."""
+        depth = 0
+        node = self
+        while node.split_point is not None:
+            depth += 1
+            node = list(node.children.values())[0]
+        return depth
+    
     def _flatten_to_list(self, nodes_list, node_index_map):
+        """Flatten tree to a list for storage."""
         node_id = len(nodes_list)
         node_index_map[id(self)] = node_id
-
+        
         child_indices = {}
-
         for key in ['NE', 'NW', 'SE', 'SW']:
             if key in self.children:
-                child_indices[key] = None
-
+                child_indices[key] = None  # Placeholder, will fill after recursion
+        
         nodes_list.append({
             'bounds': self.bounds,
             'is_leaf': self.is_leaf,
             'split_point': self.split_point,
-            'values': self.values,
-            'child_indices': child_indices,
+            'coefficients': self.coefficients,
+            'child_indices': child_indices
         })
-
+        
         for key, child in self.children.items():
             child_indices[key] = child._flatten_to_list(nodes_list, node_index_map)
-
+        
         return node_id
 
-
-# --------------------------------------------
-# Quadtree builder
-# --------------------------------------------
+# Quadtree Builder -- Must be able to export the quadtree structure and the interpolation polynomials at each leaf node for in-situ surrogate evaluation.
 def build_quadtree(
-    xmin, xmax, ymin, ymax,
-    error_threshold, max_depth,
-    global_points, global_values,
+    xmin,
+    xmax,
+    ymin,
+    ymax,
+    error_threshold,
+    max_depth,
+    global_points,
+    global_valuesuess,
     source_interpolator,
-    depth=0
+    depth=0,
 ):
+    """Recursively build adaptive quadtree based on interpolation error."""
+    
     node = QuadTreeNode((xmin, xmax, ymin, ymax))
-
+    
+    # Evaluate error for this cell
     try:
-        error, vals = evaluate_quad_error(
-            xmin, xmax, ymin, ymax,
-            global_points, global_values,
-            source_interpolator
+        error, coeffs = evaluate_quad_error(
+            xmin,
+            xmax,
+            ymin,
+            ymax,
+            global_points,
+            global_valuesuess,
+            source_interpolator,
         )
     except ValueError:
-        # No data in this cell → stop refinement
-        node.is_leaf = True
-
-        # still assign values using sampling (fallback)
-        num_pts = 4
-        x_corner = np.linspace(xmin, xmax, num_pts)
-        y_corner = np.linspace(ymin, ymax, num_pts)
-
-        x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
-        corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
-
-        vals = source_interpolator(corner_points)
-
-        # handle NaNs
-        nan_mask = np.isnan(vals)
-        if np.any(nan_mask):
-            vals[nan_mask] = np.mean(global_values)
-
-        node.values = vals.reshape(4, 4)
-
-    return node
-
-
+        # No table samples fell inside this cell.        
+        print("\n" + "+" * 60)
+        print("No points from input table fell in this cell!\nConsider lowering max depth or error threshold, or increase training resolution. Exiting program...")
+        sys.exit("+" * 60)
+    
+    # Check stopping criteria
     if error <= error_threshold or depth >= max_depth:
         node.is_leaf = True
-        node.values = vals
+        node.coefficients = coeffs
         return node
-
-    x_mid = 0.5 * (xmin + xmax)
-    y_mid = 0.5 * (ymin + ymax)
+    
+    # Split cell into 4 quadrants
+    x_mid = (xmin + xmax) / 2
+    y_mid = (ymin + ymax) / 2
     node.split_point = (x_mid, y_mid)
-
-    quads = {
-        "NE": (x_mid, xmax, y_mid, ymax),
-        "NW": (xmin, x_mid, y_mid, ymax),
-        "SE": (x_mid, xmax, ymin, y_mid),
-        "SW": (xmin, x_mid, ymin, y_mid),
+    
+    quadrants = {
+        'NE': (x_mid, xmax, y_mid, ymax),
+        'NW': (xmin, x_mid, y_mid, ymax),
+        'SE': (x_mid, xmax, ymin, y_mid),
+        'SW': (xmin, x_mid, ymin, y_mid)
     }
-
-    for key, (x1, x2, y1, y2) in quads.items():
+    
+    for key, (x1, x2, y1, y2) in quadrants.items():
         node.children[key] = build_quadtree(
-            x1, x2, y1, y2,
-            error_threshold, max_depth,
-            global_points, global_values,
+            x1,
+            x2,
+            y1,
+            y2,
+            error_threshold,
+            max_depth,
+            global_points,
+            global_valuesuess,
             source_interpolator,
-            depth + 1
+            depth + 1,
         )
-
+    
     return node
 
-
-# --------------------------------------------
-# Save / load
-# --------------------------------------------
-def save_quadtree(root, filepath):
+def save_quadtree(quadtree_root, filepath):
+    """Save quadtree to compressed NPZ file using flattened structure."""
     nodes_list = []
-    root._flatten_to_list(nodes_list, {})
-
-    bounds = []
-    is_leaf = []
-    split_points = []
-    child_indices = []
-
+    quadtree_root._flatten_to_list(nodes_list, {})
+    
+    # Flatten node data into numpy arrays
+    bounds_list = []
+    is_leaf_list = []
+    split_points_list = []
+    child_indices_list = []
+    
+    for node_data in nodes_list:
+        bounds_list.append(node_data['bounds'])
+        is_leaf_list.append(node_data['is_leaf'])
+        split_points_list.append(node_data['split_point'] if node_data['split_point'] else [0, 0])
+        
+        # Encode children as 4-tuple (NE, NW, SE, SW)
+        child_indices = node_data['child_indices']
+        indices = [
+            child_indices.get('NE', -1),
+            child_indices.get('NW', -1),
+            child_indices.get('SE', -1),
+            child_indices.get('SW', -1)
+        ]
+        child_indices_list.append(indices)
+    
+    # Collect function values (some nodes have None)
     values_dict = {}
-
-    for i, node in enumerate(nodes_list):
-        bounds.append(node["bounds"])
-        is_leaf.append(node["is_leaf"])
-
-        split_points.append(
-            node["split_point"] if node["split_point"] else [0, 0]
-        )
-
-        children = node["child_indices"]
-        child_indices.append([
-            children.get("NE", -1),
-            children.get("NW", -1),
-            children.get("SE", -1),
-            children.get("SW", -1),
-        ])
-
-        if node["values"] is not None:
-            values_dict[f"vals_{i}"] = node["values"]
-
+    for i, node_data in enumerate(nodes_list):
+        if node_data['coefficients'] is not None:
+            values_dict[f'vals_{i}'] = node_data['coefficients']
+    
+    # Save as NPZ with compression
     np.savez_compressed(
         filepath,
-        bounds=np.array(bounds, dtype=np.float64),
-        is_leaf=np.array(is_leaf, dtype=bool),
-        split_points=np.array(split_points, dtype=np.float64),
-        child_indices=np.array(child_indices, dtype=int),
+        format='quadtree_v1',
+        num_nodes=np.array([len(nodes_list)]),
+        bounds=np.array(bounds_list, dtype=np.float32),
+        is_leaf=np.array(is_leaf_list, dtype=bool),
+        split_points=np.array(split_points_list, dtype=np.float32),
+        child_indices=np.array(child_indices_list, dtype=np.int32),
         **values_dict
     )
-
-    print(f"Saved quadtree to {filepath}")
+    print(f"Saved quadtree to: {filepath}")
 
 def load_quadtree(filepath):
-    """
-    Load quadtree from NPZ and reconstruct full tree.
-    """
-    data = np.load(filepath, allow_pickle=True)
-
-    bounds = data["bounds"]
-    is_leaf = data["is_leaf"]
-    split_points = data["split_points"]
-    child_indices = data["child_indices"]
-
-    # --------------------------------------------------
-    # Step 1: Create all nodes
-    # --------------------------------------------------
+    """Load quadtree from compressed NPZ file."""
+    data = np.load(filepath, allow_pickle=False)
+    
+    if data['format'] != 'quadtree_v1':
+        raise ValueError("Invalid quadtree file format")
+    
+    num_nodes = int(data['num_nodes'][0])
+    bounds_list = data['bounds']
+    is_leaf_list = data['is_leaf']
+    split_points_list = data['split_points']
+    child_indices_list = data['child_indices']
+    
+    # Reconstruct nodes
+    nodes_list = []
+    for i in range(num_nodes):
+        node_data = {
+            'bounds': tuple(bounds_list[i]),
+            'is_leaf': bool(is_leaf_list[i]),
+            'split_point': tuple(split_points_list[i]) if not is_leaf_list[i] else None,
+            'coefficients': data[f'vals_{i}'] if f'vals_{i}' in data else None,
+            'child_indices': {}
+        }
+        nodes_list.append(node_data)
+    
+    # Reconstruct tree using flattened list
     nodes = []
-    for i in range(len(bounds)):
-        node = QuadTreeNode(tuple(bounds[i]))
-        node.is_leaf = bool(is_leaf[i])
-
-        if not node.is_leaf:
-            node.split_point = tuple(split_points[i])
-
-        # restore 4x4 values
-        key = f"vals_{i}"
-        if key in data:
-            node.values = data[key]
-
+    for node_data in nodes_list:
+        node = QuadTreeNode(node_data['bounds'])
+        node.is_leaf = node_data['is_leaf']
+        node.split_point = node_data['split_point']
+        node.coefficients = node_data['coefficients']
         nodes.append(node)
-
-    # --------------------------------------------------
-    # Step 2: Reconnect children
-    # --------------------------------------------------
-    for i, (ne, nw, se, sw) in enumerate(child_indices):
-        if ne >= 0:
-            nodes[i].children["NE"] = nodes[ne]
-        if nw >= 0:
-            nodes[i].children["NW"] = nodes[nw]
-        if se >= 0:
-            nodes[i].children["SE"] = nodes[se]
-        if sw >= 0:
-            nodes[i].children["SW"] = nodes[sw]
-
-    # Fix invalid nodes
-    for node in nodes:
-        if not node.children:
-            node.is_leaf = True
-
+    
+    # Link children
+    for i, child_indices in enumerate(child_indices_list):
+        ne_idx, nw_idx, se_idx, sw_idx = child_indices
+        if ne_idx >= 0:
+            nodes[i].children['NE'] = nodes[ne_idx]
+        if nw_idx >= 0:
+            nodes[i].children['NW'] = nodes[nw_idx]
+        if se_idx >= 0:
+            nodes[i].children['SE'] = nodes[se_idx]
+        if sw_idx >= 0:
+            nodes[i].children['SW'] = nodes[sw_idx]
+    
+    # print(f"Loaded quadtree from: {filepath}")
     return nodes[0] if nodes else None
 
-
-# --------------------------------------------
-# Main
-# --------------------------------------------
 if __name__ == "__main__":
-    global_points, global_values, source_interpolator = load_hdf5_table(
-        SOURCE_TABLE_FILE
+    x_coords, y_coords, global_points, global_values, source_interpolator = load_hdf5_table(SOURCE_TABLE_FILE)
+    domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
+    domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
+    train_resolution = len(x_coords)
+
+    print("Starting Adaptive Quadtree Decomposition from Uniform Table...")
+    quadtree_root = build_quadtree(
+        domain_xmin,
+        domain_xmax,
+        domain_ymin,
+        domain_ymax,
+        ERROR_THRESHOLD,
+        MAX_DEPTH,
+        global_points,
+        global_values,
+        source_interpolator,
     )
 
-    xmin, xmax = global_points[:, 0].min(), global_points[:, 0].max()
-    ymin, ymax = global_points[:, 1].min(), global_points[:, 1].max()
-
-    print("Building quadtree...")
-
-    root = build_quadtree(
-        xmin, xmax, ymin, ymax,
-        ERROR_THRESHOLD, MAX_DEPTH,
-        global_points, global_values,
-        source_interpolator
-    )
-
-    outfile = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}.npz"
-    save_quadtree(root, outfile)
+    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
+    save_quadtree(quadtree_root, quadtree_file)
+    

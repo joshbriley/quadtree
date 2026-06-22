@@ -4,7 +4,6 @@ import os
 from scipy.interpolate import LinearNDInterpolator
 from build_quadtree import load_quadtree
 
-
 # --------------------------------------------------
 # Load fine reference data
 # --------------------------------------------------
@@ -24,46 +23,26 @@ def load_reference_hdf5(file_path):
 
     return ref_points, ref_values, ref_interp
 
+# Compute errors by comparing the quadtree table to the (denser) testing data table
+def compute_quadtree_error(quadtree_file, ref_points, ref_values):
 
-# --------------------------------------------------
-# Error computation
-# --------------------------------------------------
-def calculate_norms_for_quadtree(quadtree_file, ref_interp, x_test, y_test):
-    """
-    Compare quadtree approximation to fine-table interpolant.
-    """
+    # Load the quadtree data
+    print(f"Loading quadtree from {quadtree_file}...")
+    root = load_quadtree(quadtree_file)
 
-    tree = load_quadtree(quadtree_file)
+    # Evaluate quadtree at all reference points
+    qt_at_ref = np.empty(len(ref_points))
+    for i, (x, y) in enumerate(ref_points):
+        qt_at_ref[i] = root.evaluate(x, y)
 
-    nx = len(x_test)
-    ny = len(y_test)
+    # Compute error norms
+    error = qt_at_ref - ref_values
+    l1 = np.mean(np.abs(error))
+    l2 = np.sqrt(np.mean(error**2))
+    linf = np.max(np.abs(error))
 
-    qt_vals = np.empty((nx, ny))
-    ref_vals = np.empty((nx, ny))
-
-    for i, x in enumerate(x_test):
-        for j, y in enumerate(y_test):
-
-            qt_vals[i, j] = tree.evaluate(x, y)
-
-            ref_val = ref_interp(x, y)
-
-            # handle outside convex hull (rare)
-            if np.isnan(ref_val):
-                ref_val = 0.0
-
-            ref_vals[i, j] = ref_val
-
-    # --------------------------------------------------
-    # Compute errors
-    # --------------------------------------------------
-    err = np.abs(qt_vals - ref_vals)
-
-    l1 = np.mean(err)
-    l2 = np.sqrt(np.mean(err**2))
-    linf = np.max(err)
-
-    size_kb = os.path.getsize(quadtree_file) / 1000.0
+    # Compute size of the quadtree file
+    size_kb = os.path.getsize(quadtree_file) / 1024
 
     return l1, l2, linf, size_kb
 
@@ -76,34 +55,15 @@ if __name__ == "__main__":
     # --------------------------------------------
     # Config
     # --------------------------------------------
-    REF_FILE = "fine_reference_data.hdf5"
-    TREE_FILE = "tables/quadtree-7-1e-3.npz"
+    TEST_FILE = "testing_data.hdf5"
+    TREE_FILE = "tables/quadtree-7-0.1.npz"
 
-    TEST_RESOLUTION = 200
+    # Load the test_file to get the test points and reference values
+    ref_points, ref_values, ref_interp = load_reference_hdf5(TEST_FILE)
+    
+    # Compute the error norms for the quadtree
+    l1, l2, linf, size_kb = compute_quadtree_error(TREE_FILE, ref_points, ref_values)
 
-    # --------------------------------------------
-    # Load reference table
-    # --------------------------------------------
-    ref_points, ref_values, ref_interp = load_reference_hdf5(REF_FILE)
-
-    xmin, xmax = ref_points[:,0].min(), ref_points[:,0].max()
-    ymin, ymax = ref_points[:,1].min(), ref_points[:,1].max()
-
-    # --------------------------------------------
-    # Build evaluation grid
-    # --------------------------------------------
-    x_test = np.linspace(xmin, xmax, TEST_RESOLUTION)
-    y_test = np.linspace(ymin, ymax, TEST_RESOLUTION)
-
-    # --------------------------------------------
-    # Compute error
-    # --------------------------------------------
-    l1, l2, linf, size_kb = calculate_norms_for_quadtree(
-        TREE_FILE,
-        ref_interp,
-        x_test,
-        y_test
-    )
 
     print("\n--- Quadtree Error ---")
     print(f"L1   : {l1:.3e}")

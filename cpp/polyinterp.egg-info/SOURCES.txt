@@ -1,0 +1,6 @@
+polyinterp.cpp
+setup.py
+polyinterp.egg-info/PKG-INFO
+polyinterp.egg-info/SOURCES.txt
+polyinterp.egg-info/dependency_links.txt
+polyinterp.egg-info/top_level.txt

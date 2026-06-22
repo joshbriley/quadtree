@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 from build_quadtree import (
-    load_uniform_table,
+    load_hdf5_table,
     build_quadtree,
     save_quadtree,
 )
@@ -29,7 +29,7 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
         global_points,
         global_vals,
         source_interpolator,
-    ) = load_uniform_table(csv_path)
+    ) = load_hdf5_table(csv_path)
 
     xmin, xmax = float(x_coords.min()), float(x_coords.max())
     ymin, ymax = float(y_coords.min()), float(y_coords.max())
