@@ -4,48 +4,48 @@ import matplotlib.pyplot as plt
 import sys
 import polyinterp 
 from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import LinearNDInterpolator
+import h5py
+
 
 """
-Build an adaptive quadtree from a uniform data table, without assuming access
-to the underlying analytical function that produced the table.
+Adaptive quadtree builder for tabulated (curvilinear) HDF5 data.
+
+Supports:
+- irregular / warped grids
+- scattered interpolation
+- fast local polynomial evaluation
 """
 
-SOURCE_TABLE_FILE = "tables/uniform_grid_func_evals/uniform_evaluations-128.csv"
-ERROR_THRESHOLD = 1e-10
-MIN_POINTS_PER_CELL = 2  # Minimum number of points in a cell to consider splitting
-INPUT_RESOLUTION = 128
-MAX_DEPTH = int(np.log(INPUT_RESOLUTION/MIN_POINTS_PER_CELL) / np.log(2)) # Max depth based on minimum points per cell and initial resolution
+# --------------------------------------------
+# Configuration
+# --------------------------------------------
+SOURCE_TABLE_FILE = "training_data.hdf5"
+ERROR_THRESHOLD = 1e-1
+MAX_DEPTH = 7
 
-def load_uniform_table(csv_path):
-    df = pd.read_csv(csv_path)
-    if not {"X", "Y", "F"}.issubset(df.columns):
-        raise ValueError("Uniform table must contain X, Y, and F columns.")
+# fixed nodes for cubic interpolation
+NODES = np.array([0.0, 1/3, 2/3, 1.0])
 
-    x_coords = np.sort(df["X"].unique())
-    y_coords = np.sort(df["Y"].unique())
-    pivot = df.pivot(index="X", columns="Y", values="F").sort_index().sort_index(axis=1)
 
-    if pivot.shape != (len(x_coords), len(y_coords)):
-        raise ValueError("Uniform table is missing grid points or is not rectangular.")
+# --------------------------------------------
+# Loader (HDF5 / scattered data)
+# --------------------------------------------
+def load_hdf5_table(file_path):
+    with h5py.File(file_path, "r") as f:
+        print("Available fields:", list(f["Table_Values"].keys()))
 
-    grid_values = pivot.to_numpy(dtype=float)
-    global_points = df[["X", "Y"]].to_numpy(dtype=float)
-    global_values = df["F"].to_numpy(dtype=float)
+        X = f["den"][:]         # (Nx, Ny)
+        Y = f["temp"][:]        # (Nx, Ny)
+        F = f["Table_Values"]["f"][:]  # target function
 
-    interp_method = "cubic" if len(x_coords) >= 4 and len(y_coords) >= 4 else "linear"
-    source_interpolator = RegularGridInterpolator(
-        (x_coords, y_coords),
-        grid_values,
-        method=interp_method,
-        bounds_error=False,
-        fill_value=None,
-    )
+    global_points = np.column_stack([X.ravel(), Y.ravel()])
+    global_values = F.ravel()
 
-    global _DEFAULT_SOURCE_INTERPOLATOR
-    _DEFAULT_SOURCE_INTERPOLATOR = source_interpolator
+    print("Building scattered interpolator...")
+    source_interpolator = LinearNDInterpolator(global_points, global_values)
 
-    return x_coords, y_coords, global_points, global_values, source_interpolator
-
+    return global_points, global_values, source_interpolator
 
 def evaluate_quad_error(
     xmin, xmax, ymin, ymax,
@@ -337,7 +337,7 @@ def load_quadtree(filepath):
     return nodes[0] if nodes else None
 
 if __name__ == "__main__":
-    x_coords, y_coords, global_points, global_values, source_interpolator = load_uniform_table(SOURCE_TABLE_FILE)
+    x_coords, y_coords, global_points, global_values, source_interpolator = load_hdf5_table(SOURCE_TABLE_FILE)
     domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
     domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
     train_resolution = len(x_coords)
@@ -354,36 +354,6 @@ if __name__ == "__main__":
         global_values,
         source_interpolator,
     )
-
-    # boxes = quadtree_root.get_leaf_cells()
-
-    # x_bg = np.linspace(domain_xmin, domain_xmax, 400)
-    # y_bg = np.linspace(domain_ymin, domain_ymax, 400)
-    # X_bg, Y_bg = np.meshgrid(x_bg, y_bg, indexing="ij")
-
-    # test_func = lambda x, y: np.tanh(x * y)
-    # Z_bg = test_func(X_bg, Y_bg)
-
-    # fig, ax = plt.subplots(figsize=(10, 8))
-    # pc = ax.pcolormesh(X_bg, Y_bg, Z_bg, cmap="viridis", shading="auto", alpha=0.75)
-    # fig.colorbar(pc, ax=ax, label="table value")
-
-    # for xmin, xmax, ymin, ymax, depth in boxes:
-    #     x_box = [xmin, xmax, xmax, xmin, xmin]
-    #     y_box = [ymin, ymin, ymax, ymax, ymin]
-    #     linewidth = max(0.5, 2.5 - 0.5 * depth)
-    #     ax.plot(x_box, y_box, color="red", linewidth=linewidth, alpha=0.8)
-
-    # ax.set_title(
-    #     f"Adaptive Quadtree from Uniform Table\n"
-    #     f"Threshold={ERROR_THRESHOLD}, Max Depth={MAX_DEPTH}, Leaves={len(boxes)}"
-    # )
-    # ax.set_xlabel("X")
-    # ax.set_ylabel("Y")
-    # ax.set_xlim(domain_xmin, domain_xmax)
-    # ax.set_ylim(domain_ymin, domain_ymax)
-    # ax.grid(False)
-    # plt.savefig("figs/quadtree_grid.png", dpi=300)
 
     quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
     save_quadtree(quadtree_root, quadtree_file)
