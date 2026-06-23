@@ -20,7 +20,6 @@ def load_reference_hdf5(file_path):
     y_coords = Y[:, 0]  # 1D array of y coordinates
 
     # Build fast regular grid interpolator
-    print("Building RegularGridInterpolator (fast)...")
     ref_interp = RegularGridInterpolator(
         (x_coords, y_coords), 
         F.T,
@@ -49,7 +48,6 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
     """
 
     # Load the quadtree data
-    print(f"Loading quadtree from {quadtree_file}...")
     root = load_quadtree(quadtree_file)
 
     # Randomly sample n_points
@@ -59,7 +57,6 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
     indices = np.random.choice(len(ref_points), size=min(n_points, len(ref_points)), replace=False)
     ref_points_sub = ref_points[indices]
     ref_values_sub = ref_values[indices]
-    print(f"Evaluating at {len(ref_points_sub)} random points...")
     
     # Evaluate quadtree at subsampled reference points
     qt_at_ref = np.empty(len(ref_points_sub))
@@ -83,7 +80,7 @@ if __name__ == "__main__":
     # Parameters
     test_file = "testing_data.hdf5" # Dense reference data
     tree_file = "tables/quadtree-6-0.0001-4321.npz" # Quadtree file to evaluate
-    n_random_points = 1000  # Number of random points to sample for error evaluation
+    n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values
     ref_points, ref_values, ref_interp = load_reference_hdf5(test_file)
@@ -92,11 +89,13 @@ if __name__ == "__main__":
     l1, l2, linf, size_kb = compute_quadtree_error(
         tree_file, ref_points, ref_values, 
         n_points=n_random_points,
-        random_seed=42
+        random_seed=None
     )
 
-    print("\n--- Quadtree Error ---")
-    print(f"L1   : {l1:.3e}")
-    print(f"L2   : {l2:.3e}")
-    print(f"Linf : {linf:.3e}")
-    print(f"Size : {size_kb:.2f} kB")
+    print("\n+-- Quadtree Relative Error --+")
+    print(f"| L1   : {l1:.3e}            |")
+    print(f"| L2   : {l2:.3e}            |")
+    print(f"| Linf : {linf:.3e}            |")
+    print(f"| Size : {size_kb:.2f} kB           |")
+    print("+-----------------------------+")
+    print(f"Number of random points evaluated: {n_random_points:.1e}\n")
