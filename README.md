@@ -36,7 +36,7 @@ Knoweldge of the true function that is being evaluated to compute relative error
 +-- Quadtree Relative Error --+
 | L1   : 2.675e-05            |
 | L2   : 9.135e-05            |
-| Linf : 1.625e-05            |
+| Linf : 1.625e-03            |
 | Size : 84.71 kB             |
 +-----------------------------+
 ```
