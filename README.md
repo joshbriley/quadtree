@@ -14,6 +14,8 @@ This branch is the same as the `hdf5` branch, but with with the intention of ver
 - Quadtree size: 968.79 kB
 
 ## Results
+### This branch
+HDF5 files and no knowledge of the function when evaluating error -- only a finer resolution table that is being randomly sampled. 
 ```
 +-- Quadtree Relative Error --+
 | L1   : 1.525e-04            |
@@ -28,7 +30,7 @@ This branch is the same as the `hdf5` branch, but with with the intention of ver
 These results are similar to what is seen on the `main` branch when the true function is used to evaluate the error, which suggests that the quadtree is working properly.
 
 ### Results from `main` branch: 
-
+Knoweldge of the true function that is being evaluated to compute relative error.
 
 ```
 +-- Quadtree Relative Error --+
