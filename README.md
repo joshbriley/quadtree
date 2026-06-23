@@ -7,22 +7,24 @@ This branch is the same as the `hdf5` branch, but with with the intention of ver
 - I wrote a script to evaluate the quadtree at 100,000 random points, and compare the results to the 256x256 table. The error is calculated as the absolute difference between the quadtree evaluation and the reference evaluation.
 
 ## Tree parameters
-Max depth: 6
-Error threshold: 1e-4
-Resolution of training table: 128x128
-Quadtree file: `tables/quadtree-6-0.0001-128.npz`
-Quadtree size: 968.79 kB
+- Max depth: 6
+- Error threshold: 1e-4
+- Resolution of training table: 128x128
+- Quadtree file: `tables/quadtree-6-0.0001-128.npz`
+- Quadtree size: 968.79 kB
 
 ## Results
+```
 +-- Quadtree Relative Error --+
 | L1   : 1.525e-04            |
 | L2   : 2.116e-04            |
 | Linf : 1.227e-03            |
 | Size : 968.79 kB            |
 +-----------------------------+
+```
 
-Resolution of reference table: 256x256
-Number of points sampled: 100,000
+- Resolution of reference table: 256x256
+- Number of points sampled: 100,000
 
 These results are similar to what is seen on the `main` branch when the true function is used to evaluate the error, which suggests that the quadtree is working properly.
 
