@@ -14,12 +14,14 @@ Quadtree file: `tables/quadtree-6-0.0001-128.npz`
 Quadtree size: 968.79 kB
 
 ## Results
+```
 +-- Quadtree Relative Error --+
 | L1   : 1.525e-04            |
 | L2   : 2.116e-04            |
 | Linf : 1.227e-03            |
 | Size : 968.79 kB            |
 +-----------------------------+
+```
 
 Resolution of reference table: 256x256
 Number of points sampled: 100,000
