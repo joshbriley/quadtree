@@ -16,7 +16,7 @@ Supports:
 """
 
 # Config
-hdf5_file = "training_data.hdf5"
+hdf5_file = "../hdf5_data/uniform_evaluations-128.hdf5"
 error_threshold = 1e-4
 max_depth = 6
 
@@ -30,14 +30,14 @@ def load_hdf5_table(file_path):
         F = f["Table_Values"]["f"][:]
 
     # Build tree in log10-space to better resolve multi-decade behavior.
-    X = np.log10(X_raw)
-    Y = np.log10(Y_raw)
+    # X = np.log10(X_raw)
+    # Y = np.log10(Y_raw)
 
     # den varies along columns, temp varies along rows
-    x_coords = X[0, :]
-    y_coords = Y[:, 0]
+    x_coords = X_raw[:, 0]
+    y_coords = Y_raw[0, :]
     global_values = F.ravel()
-    global_points = np.column_stack((X.ravel(), Y.ravel()))
+    global_points = np.column_stack((X_raw.ravel(), Y_raw.ravel()))
 
     global_interpolator = RegularGridInterpolator(
         (x_coords, y_coords),
@@ -110,9 +110,9 @@ class QuadTreeNode:
     
     def evaluate(self, x, y, assume_internal_coords=False):
         """Navigate tree and evaluate polynomial at (x, y)."""
-        if not assume_internal_coords and self.input_space == "log10":
-            x = np.log10(x)
-            y = np.log10(y)
+        # if not assume_internal_coords and self.input_space == "log10":
+        #     x = np.log10(x)
+        #     y = np.log10(y)
 
         if self.is_leaf:
             if self.coefficients is None:

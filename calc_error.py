@@ -16,8 +16,8 @@ def load_reference_hdf5(file_path):
     # Extract 1D coordinate vectors (regular grid)
     # den is constant along rows, varies along columns
     # temp is constant along columns, varies along rows
-    x_coords = X[0, :]  # 1D array of x coordinates
-    y_coords = Y[:, 0]  # 1D array of y coordinates
+    x_coords = X[:, 0]  # 1D array of x coordinates
+    y_coords = Y[0, :]  # 1D array of y coordinates
 
     # Build fast regular grid interpolator
     ref_interp = RegularGridInterpolator(
@@ -78,8 +78,8 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
 if __name__ == "__main__":
 
     # Parameters
-    test_file = "testing_data.hdf5" # Dense reference data
-    tree_file = "tables/quadtree-6-0.0001-4321.npz" # Quadtree file to evaluate
+    test_file = "../hdf5_data/uniform_evaluations-256.hdf5" # Dense reference data
+    tree_file = "tables/quadtree-6-0.0001-128.npz" # Quadtree file to evaluate
     n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values
