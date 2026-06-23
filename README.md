@@ -22,9 +22,21 @@ This branch is the same as the `hdf5` branch, but with with the intention of ver
 | Size : 968.79 kB            |
 +-----------------------------+
 ```
-
 - Resolution of reference table: 256x256
 - Number of points sampled: 100,000
 
 These results are similar to what is seen on the `main` branch when the true function is used to evaluate the error, which suggests that the quadtree is working properly.
+
+### Results from `main` branch: 
+
+
+```
++-- Quadtree Relative Error --+
+| L1   : 2.675e-05            |
+| L2   : 9.135e-05            |
+| Linf : 1.625e-05            |
+| Size : 84.71 kB             |
++-----------------------------+
+```
+- Grid Resolution: 256 x 256
 
