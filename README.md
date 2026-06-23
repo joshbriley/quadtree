@@ -1,12 +1,14 @@
 # Quadtree Surrogate From Uniform Tables
 
+This branch utilizes `.hdf5` files for the source uniform table and reference evaluation points. The original branch used CSV files, but HDF5 is more efficient for large datasets.
+
 ## Overview
 This repository builds an adaptive quadtree surrogate from a uniform data table and evaluates interpolation error/size tradeoffs across saved tree files.
 
-The current workflow does not require knowing the original analytical function. Instead, tree refinement is driven by values in a uniform CSV table with columns `X`, `Y`, and `F`.
+The current workflow does not require knowing the original analytical function. Instead, tree refinement is driven by values in a HDF5 table with datasets `X`, `Y`, and `F`.
 
 ## Repository Workflow
-1. Generate or provide a uniform grid table in CSV format (`X`, `Y`, `F`).
+1. Provide a table in HDF5 format (`X`, `Y`, `F`).
 2. Build an adaptive quadtree from that table and save it as `.npz`.
 3. Load one or more saved tree files and compute full-domain $L_1$, $L_2$, and $L_\infty$ norms.
 4. Save norm/size summaries as CSV and plots.
@@ -26,10 +28,6 @@ The current workflow does not require knowing the original analytical function. 
 		- comparison CSV: `tables/quadtree_norm_size_comparison.csv`
 		- scatter plot: `figs/quadtree_norm_vs_size.png`
 		- bar plot: `figs/quadtree_norms_by_file.png`
-
-- `build_uniform_table.py`
-	- Generates a uniform table CSV under `tables/uniform_grid_func_evals/`.
-	- Useful for creating source data when you do not already have a table during testing. 
 
 ## Legacy / Older Utilities
 - `evaluate_norms.py`: Older norm-evaluation utility based on direct CSV interpolation.
