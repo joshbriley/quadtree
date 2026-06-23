@@ -120,7 +120,6 @@ class QuadTreeNode:
             return polyinterp.evaluate_polynomial(self.coefficients, x, y, self.bounds)
         
         # Navigate to correct child quadrant
-        xmin, xmax, ymin, ymax = self.bounds
         x_mid, y_mid = self.split_point
         
         if x >= x_mid:
