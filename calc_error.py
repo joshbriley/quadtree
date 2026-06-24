@@ -13,13 +13,13 @@ def test_func(x, y):
 # --- Configuration ---
 DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
 DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-TEST_RESOLUTION = 300
+TEST_RESOLUTION = 256
 QUADTREE_FILES = [
-    "tables/quadtree-7-1.0e-05-128.npz", 
-    "tables/quadtree-7-1.0e-04-128.npz",
-    "tables/quadtree-7-1.0e-03-128.npz",
-    "tables/quadtree-7-1.0e-02-128.npz",
-    "tables/quadtree-7-1.0e-01-128.npz",
+    "tables/quadtree-6-0.0001-128.npz", 
+    # "tables/quadtree-7-1.0e-04-128.npz",
+    # "tables/quadtree-7-1.0e-03-128.npz",
+    # "tables/quadtree-7-1.0e-02-128.npz",
+    # "tables/quadtree-7-1.0e-01-128.npz",
     # "tables/quadtree-9-1e-05-256.npz", 
     # "tables/quadtree-9-0.0001-256.npz",
     # "tables/quadtree-9-0.001-256.npz",
@@ -40,7 +40,7 @@ def calculate_norms_for_quadtree(quadtree_file, x_test, y_test, true_vals):
         for j, y in enumerate(y_test):
             interp_vals[i, j] = loaded_quadtree.evaluate(x, y)
 
-    abs_error = np.abs(interp_vals - true_vals)
+    abs_error = np.abs(interp_vals - true_vals) / np.abs(true_vals + 1e-12)  # Avoid division by zero
     l1_norm = np.mean(abs_error)
     l2_norm = np.sqrt(np.mean(abs_error**2))
     linf_norm = np.max(abs_error)
@@ -88,42 +88,42 @@ def main():
         writer.writeheader()
         writer.writerows(results)
 
-    sizes = np.array([r["size_kb"] for r in results])
-    l1_vals = np.array([r["L1"] for r in results])
-    l2_vals = np.array([r["L2"] for r in results])
-    linf_vals = np.array([r["L_inf"] for r in results])
-    labels = [r["file"] for r in results]
+    # sizes = np.array([r["size_kb"] for r in results])
+    # l1_vals = np.array([r["L1"] for r in results])
+    # l2_vals = np.array([r["L2"] for r in results])
+    # linf_vals = np.array([r["L_inf"] for r in results])
+    # labels = [r["file"] for r in results]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.scatter(sizes, l1_vals, label="L1", marker="o")
-    ax.scatter(sizes, l2_vals, label="L2", marker="s")
-    ax.scatter(sizes, linf_vals, label="L_inf", marker="^")
-    ax.set_xlabel("Table Size (kB)")
-    ax.set_ylabel("Norm Value")
-    ax.set_yscale("log")
-    ax.set_title("Norm vs Table Size")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(OUTPUT_SCATTER_PNG, dpi=200)
-    plt.close(fig)
+    # fig, ax = plt.subplots(figsize=(10, 6))
+    # ax.scatter(sizes, l1_vals, label="L1", marker="o")
+    # ax.scatter(sizes, l2_vals, label="L2", marker="s")
+    # ax.scatter(sizes, linf_vals, label="L_inf", marker="^")
+    # ax.set_xlabel("Table Size (kB)")
+    # ax.set_ylabel("Norm Value")
+    # ax.set_yscale("log")
+    # ax.set_title("Norm vs Table Size")
+    # ax.grid(True, alpha=0.3)
+    # ax.legend()
+    # fig.tight_layout()
+    # fig.savefig(OUTPUT_SCATTER_PNG, dpi=200)
+    # plt.close(fig)
 
-    x_idx = np.arange(len(labels))
-    width = 0.25
-    fig, ax = plt.subplots(figsize=(14, 6))
-    ax.bar(x_idx - width, l1_vals, width, label="L1")
-    ax.bar(x_idx, l2_vals, width, label="L2")
-    ax.bar(x_idx + width, linf_vals, width, label="L_inf")
-    ax.set_xticks(x_idx)
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.set_yscale("log")
-    ax.set_ylabel("Norm Value")
-    ax.set_title("Norms by Quadtree Table")
-    ax.grid(True, axis="y", alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(OUTPUT_BAR_PNG, dpi=200)
-    plt.close(fig)
+    # x_idx = np.arange(len(labels))
+    # width = 0.25
+    # fig, ax = plt.subplots(figsize=(14, 6))
+    # ax.bar(x_idx - width, l1_vals, width, label="L1")
+    # ax.bar(x_idx, l2_vals, width, label="L2")
+    # ax.bar(x_idx + width, linf_vals, width, label="L_inf")
+    # ax.set_xticks(x_idx)
+    # ax.set_xticklabels(labels, rotation=45, ha="right")
+    # ax.set_yscale("log")
+    # ax.set_ylabel("Norm Value")
+    # ax.set_title("Norms by Quadtree Table")
+    # ax.grid(True, axis="y", alpha=0.3)
+    # ax.legend()
+    # fig.tight_layout()
+    # fig.savefig(OUTPUT_BAR_PNG, dpi=200)
+    # plt.close(fig)
 
     print(f"Saved CSV: {OUTPUT_CSV}")
     print(f"Saved plot: {OUTPUT_SCATTER_PNG}")
