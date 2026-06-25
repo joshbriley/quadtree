@@ -42,7 +42,6 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
     Parameters:
     n_points : int or None
         If int, randomly sample n_points from ref_points.
-        If None, use all points.
     random_seed : int or None
         Seed for reproducibility when sampling.
     """

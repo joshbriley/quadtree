@@ -1,8 +1,12 @@
 # Overview
 
-This branch is the same as the `hdf5` branch, but with with the intention of verifying the method is working properly. I removed all log10 transformations since the function (`f = tanh(x*y)`) only spans ~[-1, 1] and does not have multi-decade behavior.
+This branch is the same as the `hdf5` branch, but with with the intention of
+verifying the method is working properly. I removed all log10 transformations
+since the function (`f = tanh(x*y)`) only spans ~[-1, 1] and does not have
+multi-decade behavior.
 
-- I built a uniform table of evaluations of the function `f` on a 128x128 and 256x256 grid, and saved it to an HDF5 file.
+- I built a uniform table of evaluations of the function `f` on a 128x128 and
+  256x256 grid, and saved it to an HDF5 file.
 - I built a quadtree from the 128x128 table, and saved it to a `.npz` file.
 - I wrote a script to evaluate the quadtree at 100,000 random points, and
   compare the results to the 256x256 table. The error is calculated as the
@@ -18,7 +22,8 @@ This branch is the same as the `hdf5` branch, but with with the intention of ver
 
 ## Results
 ### This branch
-HDF5 files and no knowledge of the function when evaluating error -- only a finer resolution table that is being randomly sampled. 
+HDF5 files and no knowledge of the function when evaluating error -- only a
+finer resolution table that is being randomly sampled. 
 ```
 +-- Quadtree Relative Error --+
 | L1   : 1.525e-04            |
@@ -47,3 +52,6 @@ Knoweldge of the true function that is being evaluated to compute relative error
 ```
 - Grid Resolution: 256 x 256
 
+## Note
+Please note that the `.hdf5` files are not in this repository. Due to file
+sizes I chose not to push them to the remote repository. 
