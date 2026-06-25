@@ -15,11 +15,17 @@ Supports:
 - fast local polynomial evaluation
 """
 
-# Config
-hdf5_file = "training_data.hdf5"
+# Config parameters
+hdf5_file = "../hdf5_data/training_data.hdf5"
 error_threshold = 1e-4
-max_depth = 6
+ppc = 4 # Minimum desired points per cell
 
+with h5py.File(hdf5_file, "r") as f:
+    ds = f["den"][:] # Assuming den, temp, and f are all the same dimension
+    ds_size = ds.size
+
+max_depth = int((np.log(ds_size/ppc))/np.log(4)) # For training_data.hdf5 this is 10 
+print(f"Max Depth: {max_depth}")
 
 # Load HDF5 table
 def load_hdf5_table(file_path):
@@ -56,9 +62,7 @@ def evaluate_quad_error(
     """
     Compute error of local polynomial approximation on a cell.
     """
-    # --------------------------------------------------
-    # Step 1: build corner grid (4x4)
-    # --------------------------------------------------
+    # Build corner grid (4x4)
     num_of_points = 4
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
@@ -85,7 +89,7 @@ def evaluate_quad_error(
         raise ValueError("No points found in cell for error evaluation.")
 
     
-    #Evaluate polynomial (Using C++ implementation for speed)
+    # Evaluate polynomial (Using C++ implementation for speed)
     interp_vals = np.array([
         polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
         for x, y in testing_pts

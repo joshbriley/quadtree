@@ -4,9 +4,7 @@ import os
 from scipy.interpolate import RegularGridInterpolator
 from build_quadtree import load_quadtree
 
-# --------------------------------------------------
 # Load fine reference data
-# --------------------------------------------------
 def load_reference_hdf5(file_path):
     with h5py.File(file_path, "r") as f:
         X = f["den"][:]    
@@ -78,8 +76,8 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
 if __name__ == "__main__":
 
     # Parameters
-    test_file = "testing_data.hdf5" # Dense reference data
-    tree_file = "tables/quadtree-6-0.0001-4321.npz" # Quadtree file to evaluate
+    test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
+    tree_file = "tables/quadtree-7-1e-06-4321.npz" # Quadtree file to evaluate
     n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values
@@ -93,9 +91,9 @@ if __name__ == "__main__":
     )
 
     print("\n+-- Quadtree Relative Error --+")
-    print(f"| L1   : {l1:.3e}            |")
-    print(f"| L2   : {l2:.3e}            |")
-    print(f"| Linf : {linf:.3e}            |")
-    print(f"| Size : {size_kb:.2f} kB           |")
+    print(f"| L1   : {l1:.3e}")
+    print(f"| L2   : {l2:.3e}")
+    print(f"| Linf : {linf:.3e}")
+    print(f"| Size : {size_kb:.2f} kB")
     print("+-----------------------------+")
     print(f"Number of random points evaluated: {n_random_points:.1e}\n")
