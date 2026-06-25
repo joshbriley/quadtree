@@ -113,14 +113,6 @@ error_threshold = 1e-5  # Stricter convergence
 ```
 Then rebuild: `python build_quadtree.py` and re-evaluate.
 
-## Error Metrics
-
-### Relative Error
-Used during tree refinement to decide cell splitting:
-$$\text{rel\_error} = \frac{|\text{pred} - \text{truth}|}{|\text{truth}| + \varepsilon}$$
-
-This ensures cells are refined where they matter most relative to local signal magnitude.
-
 ## File Organization
 ```
 .
