@@ -1,135 +1,101 @@
 import numpy as np
+import h5py
 import os
-import csv
-import matplotlib.pyplot as plt
+from scipy.interpolate import RegularGridInterpolator
 from build_quadtree import load_quadtree
 
-# def test_func(x, y):
-#     return np.sin(x * y) + 1.0 / (1.0 + np.exp(-100*(x - y)))
+# --------------------------------------------------
+# Load fine reference data
+# --------------------------------------------------
+def load_reference_hdf5(file_path):
+    with h5py.File(file_path, "r") as f:
+        X = f["den"][:]    
+        Y = f["temp"][:]   
+        F = f["Table_Values"]["f"][:]
 
-def test_func(x, y):
-    return np.tanh(x * y)
+    # Extract 1D coordinate vectors (regular grid)
+    # den is constant along rows, varies along columns
+    # temp is constant along columns, varies along rows
+    x_coords = X[:, 0]  # 1D array of x coordinates
+    y_coords = Y[0, :]  # 1D array of y coordinates
 
-# --- Configuration ---
-DOMAIN_XMIN, DOMAIN_XMAX = -2.0, 2.0
-DOMAIN_YMIN, DOMAIN_YMAX = -2.0, 2.0
-TEST_RESOLUTION = 256
-QUADTREE_FILES = [
-    "tables/quadtree-6-0.0001-128.npz", 
-    # "tables/quadtree-7-1.0e-04-128.npz",
-    # "tables/quadtree-7-1.0e-03-128.npz",
-    # "tables/quadtree-7-1.0e-02-128.npz",
-    # "tables/quadtree-7-1.0e-01-128.npz",
-    # "tables/quadtree-9-1e-05-256.npz", 
-    # "tables/quadtree-9-0.0001-256.npz",
-    # "tables/quadtree-9-0.001-256.npz",
-    # "tables/quadtree-9-0.01-256.npz",
-    # "tables/quadtree-9-0.1-256.npz",
-]
+    # Build fast regular grid interpolator
+    ref_interp = RegularGridInterpolator(
+        (x_coords, y_coords), 
+        F.T,
+        method='linear',
+        bounds_error=False,
+        fill_value=np.nan
+    )
 
-OUTPUT_CSV = "tables/quadtree_norm_size_comparison.csv"
-OUTPUT_SCATTER_PNG = "figs/quadtree_norm_vs_size.png"
-OUTPUT_BAR_PNG = "figs/quadtree_norms_by_file.png"
+    # For compatibility with rest of code, also return flattened points/values
+    ref_points = np.column_stack([X.ravel(), Y.ravel()])
+    ref_values = F.ravel()
 
+    return ref_points, ref_values, ref_interp
 
-def calculate_norms_for_quadtree(quadtree_file, x_test, y_test, true_vals):
-    loaded_quadtree = load_quadtree(quadtree_file)
-    interp_vals = np.empty_like(true_vals, dtype=float)
+# Compute errors by comparing the quadtree table to the (denser) testing data table
+def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None, random_seed=None):
+    """
+    Evaluate quadtree error at reference points.
+    
+    Parameters:
+    n_points : int or None
+        If int, randomly sample n_points from ref_points.
+        If None, use all points.
+    random_seed : int or None
+        Seed for reproducibility when sampling.
+    """
 
-    for i, x in enumerate(x_test):
-        for j, y in enumerate(y_test):
-            interp_vals[i, j] = loaded_quadtree.evaluate(x, y)
+    # Load the quadtree data
+    root = load_quadtree(quadtree_file)
 
-    abs_error = np.abs(interp_vals - true_vals) / np.abs(true_vals + 1e-12)  # Avoid division by zero
-    l1_norm = np.mean(abs_error)
-    l2_norm = np.sqrt(np.mean(abs_error**2))
-    linf_norm = np.max(abs_error)
-    table_size_kb = os.path.getsize(quadtree_file) / 1000.0
-    return l1_norm, l2_norm, linf_norm, table_size_kb
+    # Randomly sample n_points
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        
+    indices = np.random.choice(len(ref_points), size=min(n_points, len(ref_points)), replace=False)
+    ref_points_sub = ref_points[indices]
+    ref_values_sub = ref_values[indices]
+    
+    # Evaluate quadtree at subsampled reference points
+    qt_at_ref = np.empty(len(ref_points_sub))
+    for i, (x, y) in enumerate(ref_points_sub):
+        qt_at_ref[i] = root.evaluate(x, y)
 
+    # Compute relative error norms
+    error = (qt_at_ref - ref_values_sub) / (np.abs(ref_values_sub) + 1e-12)  # Avoid division by zero
+    l1 = np.mean(np.abs(error))
+    l2 = np.sqrt(np.mean(error**2))
+    linf = np.max(np.abs(error))
 
-def main():
-    x_test = np.linspace(DOMAIN_XMIN, DOMAIN_XMAX, TEST_RESOLUTION)
-    y_test = np.linspace(DOMAIN_YMIN, DOMAIN_YMAX, TEST_RESOLUTION)
-    X_test, Y_test = np.meshgrid(x_test, y_test, indexing="ij")
-    true_vals = test_func(X_test, Y_test)
+    # Compute size of the quadtree file
+    size_kb = os.path.getsize(quadtree_file) / 1024
 
-    print("\n--- Full-Domain Norms vs Table Size ---")
-    print(f"Grid Resolution: {TEST_RESOLUTION} x {TEST_RESOLUTION}")
-    print("file | size_kb | L1 | L2 | L_inf")
-    print("-----|---------|----|----|------")
-
-    results = []
-
-    for quadtree_file in QUADTREE_FILES:
-        # print(f"Evaluating {os.path.basename(quadtree_file)}...")
-        l1_norm, l2_norm, linf_norm, table_size_kb = calculate_norms_for_quadtree(
-            quadtree_file, x_test, y_test, true_vals
-        )
-        file_name = os.path.basename(quadtree_file)
-        results.append({
-            "file": file_name,
-            "size_kb": table_size_kb,
-            "L1": l1_norm,
-            "L2": l2_norm,
-            "L_inf": linf_norm,
-        })
-        print(
-            f"{file_name} | "
-            f"{table_size_kb:.2f} | "
-            f"{l1_norm:.6e} | {l2_norm:.6e} | {linf_norm:.6e}"
-        )
-
-    os.makedirs("tables", exist_ok=True)
-    os.makedirs("figs", exist_ok=True)
-
-    with open(OUTPUT_CSV, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["file", "size_kb", "L1", "L2", "L_inf"])
-        writer.writeheader()
-        writer.writerows(results)
-
-    # sizes = np.array([r["size_kb"] for r in results])
-    # l1_vals = np.array([r["L1"] for r in results])
-    # l2_vals = np.array([r["L2"] for r in results])
-    # linf_vals = np.array([r["L_inf"] for r in results])
-    # labels = [r["file"] for r in results]
-
-    # fig, ax = plt.subplots(figsize=(10, 6))
-    # ax.scatter(sizes, l1_vals, label="L1", marker="o")
-    # ax.scatter(sizes, l2_vals, label="L2", marker="s")
-    # ax.scatter(sizes, linf_vals, label="L_inf", marker="^")
-    # ax.set_xlabel("Table Size (kB)")
-    # ax.set_ylabel("Norm Value")
-    # ax.set_yscale("log")
-    # ax.set_title("Norm vs Table Size")
-    # ax.grid(True, alpha=0.3)
-    # ax.legend()
-    # fig.tight_layout()
-    # fig.savefig(OUTPUT_SCATTER_PNG, dpi=200)
-    # plt.close(fig)
-
-    # x_idx = np.arange(len(labels))
-    # width = 0.25
-    # fig, ax = plt.subplots(figsize=(14, 6))
-    # ax.bar(x_idx - width, l1_vals, width, label="L1")
-    # ax.bar(x_idx, l2_vals, width, label="L2")
-    # ax.bar(x_idx + width, linf_vals, width, label="L_inf")
-    # ax.set_xticks(x_idx)
-    # ax.set_xticklabels(labels, rotation=45, ha="right")
-    # ax.set_yscale("log")
-    # ax.set_ylabel("Norm Value")
-    # ax.set_title("Norms by Quadtree Table")
-    # ax.grid(True, axis="y", alpha=0.3)
-    # ax.legend()
-    # fig.tight_layout()
-    # fig.savefig(OUTPUT_BAR_PNG, dpi=200)
-    # plt.close(fig)
-
-    print(f"Saved CSV: {OUTPUT_CSV}")
-    print(f"Saved plot: {OUTPUT_SCATTER_PNG}")
-    print(f"Saved plot: {OUTPUT_BAR_PNG}")
-    print("---")
+    return l1, l2, linf, size_kb
 
 
 if __name__ == "__main__":
-    main()
+
+    # Parameters
+    test_file = "../hdf5_data/uniform_evaluations-256.hdf5" # Dense reference data
+    tree_file = "tables/quadtree-6-0.0001-128.npz" # Quadtree file to evaluate
+    n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
+
+    # Load the test_file to get the test points and reference values
+    ref_points, ref_values, ref_interp = load_reference_hdf5(test_file)
+    
+    # Compute the error norms for the quadtree at random points
+    l1, l2, linf, size_kb = compute_quadtree_error(
+        tree_file, ref_points, ref_values, 
+        n_points=n_random_points,
+        random_seed=None
+    )
+
+    print("\n+-- Quadtree Relative Error --+")
+    print(f"| L1   : {l1:.3e}")
+    print(f"| L2   : {l2:.3e}")
+    print(f"| Linf : {linf:.3e}")
+    print(f"| Size : {size_kb:.2f} kB")
+    print("+-----------------------------+")
+    print(f"Number of random points evaluated: {n_random_points:.1e}\n")

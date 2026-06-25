@@ -4,48 +4,45 @@ import matplotlib.pyplot as plt
 import sys
 import polyinterp 
 from scipy.interpolate import RegularGridInterpolator
+import h5py
 
-"""
-Build an adaptive quadtree from a uniform data table, without assuming access
-to the underlying analytical function that produced the table.
-"""
+# Build an adaptive quadtree from a uniform data table, without assuming access
+# to the underlying analytical function that produced the table.
 
-SOURCE_TABLE_FILE = "tables/uniform_grid_func_evals/uniform_evaluations-128.csv"
-ERROR_THRESHOLD = 1e-4
-# MIN_POINTS_PER_CELL = 2  # Minimum number of points in a cell to consider splitting
-INPUT_RESOLUTION = 128
-MAX_DEPTH = 6
-# MAX_DEPTH = int(np.log(INPUT_RESOLUTION/MIN_POINTS_PER_CELL) / np.log(2)) # Max depth based on minimum points per cell and initial resolution
+hdf5_table = "../hdf5_data/uniform_evaluations-128.hdf5"
+input_resolution = 128
+error_threshold = 1e-4
+max_depth = 6
+input_resolution = 128
+# min_points_per_cell = 2  # Minimum number of points in a cell to consider splitting
+# max_depth = int(np.log(input_resolution/min_points_per_cell) / np.log(2)) # Max depth based on minimum points per cell and initial resolution
 
-def load_uniform_table(csv_path):
-    df = pd.read_csv(csv_path)
-    if not {"X", "Y", "F"}.issubset(df.columns):
-        raise ValueError("Uniform table must contain X, Y, and F columns.")
+# Load HDF5 table
+def load_hdf5(file_path):
 
-    x_coords = np.sort(df["X"].unique())
-    y_coords = np.sort(df["Y"].unique())
-    pivot = df.pivot(index="X", columns="Y", values="F").sort_index().sort_index(axis=1)
+    with h5py.File(file_path, "r") as f:
+        X_raw = f["den"][:]
+        Y_raw = f["temp"][:]
+        F = f["Table_Values"]["f"][:]
 
-    if pivot.shape != (len(x_coords), len(y_coords)):
-        raise ValueError("Uniform table is missing grid points or is not rectangular.")
+    # Build tree in log10-space to better resolve multi-decade behavior.
+    # X = np.log10(X_raw)
+    # Y = np.log10(Y_raw)
 
-    grid_values = pivot.to_numpy(dtype=float)
-    global_points = df[["X", "Y"]].to_numpy(dtype=float)
-    global_values = df["F"].to_numpy(dtype=float)
+    # den varies along columns, temp varies along rows
+    x_coords = X_raw[:, 0]
+    y_coords = Y_raw[0, :]
+    global_values = F.ravel()
+    global_points = np.column_stack((X_raw.ravel(), Y_raw.ravel()))
 
-    interp_method = "cubic" if len(x_coords) >= 4 and len(y_coords) >= 4 else "linear"
-    source_interpolator = RegularGridInterpolator(
+    global_interpolator = RegularGridInterpolator(
         (x_coords, y_coords),
-        grid_values,
-        method=interp_method,
+        F.T,
+        method="linear",
         bounds_error=False,
-        fill_value=None,
+        fill_value=np.nan,
     )
-
-    global _DEFAULT_SOURCE_INTERPOLATOR
-    _DEFAULT_SOURCE_INTERPOLATOR = source_interpolator
-
-    return x_coords, y_coords, global_points, global_values, source_interpolator
+    return x_coords, y_coords, global_points, global_values, global_interpolator
 
 
 def evaluate_quad_error(
@@ -338,7 +335,7 @@ def load_quadtree(filepath):
     return nodes[0] if nodes else None
 
 if __name__ == "__main__":
-    x_coords, y_coords, global_points, global_values, source_interpolator = load_uniform_table(SOURCE_TABLE_FILE)
+    x_coords, y_coords, global_points, global_values, source_interpolator = load_hdf5(hdf5_table)
     domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
     domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
     train_resolution = len(x_coords)
@@ -349,8 +346,8 @@ if __name__ == "__main__":
         domain_xmax,
         domain_ymin,
         domain_ymax,
-        ERROR_THRESHOLD,
-        MAX_DEPTH,
+        error_threshold,
+        max_depth,
         global_points,
         global_values,
         source_interpolator,
@@ -386,9 +383,5 @@ if __name__ == "__main__":
     # ax.grid(False)
     # plt.savefig("figs/quadtree_grid.png", dpi=300)
 
-    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
+    quadtree_file = f"tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}.npz"
     save_quadtree(quadtree_root, quadtree_file)
-    
-    quadtree_file = f"tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{train_resolution}.npz"
-    save_quadtree(quadtree_root, quadtree_file)
-    

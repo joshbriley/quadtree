@@ -1,15 +1,15 @@
-# Saves a 2D and 3D plot of the test functiona and saves a csv file of evaluations on the test function.
+# Saves a 2D and 3D plot of the test function and saves an HDF5 file of evaluations on the test function.
 
 import numpy as np
-import pandas as pd
+import h5py
 import matplotlib.pyplot as plt
 
-# 1. Define resolution
-resolution = 128
+# Define resolution
+resolution = 256
 x_pts = np.linspace(-2, 2, resolution)
 y_pts = np.linspace(-2, 2, resolution)
 
-# 2. Create a 2D grid for the function evaluation
+# Create a 2D grid for the function evaluation
 X, Y = np.meshgrid(x_pts, y_pts, indexing='ij')
 
 # # Evaluate the 2D function
@@ -18,7 +18,17 @@ X, Y = np.meshgrid(x_pts, y_pts, indexing='ij')
 # Use a 2-dimensional tanh as a smoother function 
 func_grid = np.tanh(X*Y)
 
-# ## ------------------------- ##
+# Save to an HDF5 file matching the expected structure (den, temp, Table_Values/f)
+output_filename = f'tables/uniform_grid_func_evals/uniform_evaluations-{resolution}.hdf5'
+with h5py.File(output_filename, 'w') as f:
+    f.create_dataset('den', data=X)
+    f.create_dataset('temp', data=Y)
+    grp = f.create_group('Table_Values')
+    grp.create_dataset('f', data=func_grid)
+
+print(f"Saved {resolution}x{resolution} = {resolution**2:,} grid points to '{output_filename}'\n---")
+
+# ## ----------- PLOTTING ------------- ## #
 # # --- Plot 1: 2D Heatmap ---
 # fig = plt.figure(figsize=(14, 6))
 # ax1 = fig.add_subplot(1, 2, 1)
@@ -47,20 +57,3 @@ func_grid = np.tanh(X*Y)
 # print(f"---\nSaved plot to '{filename}'\n---")
 # ## ------------------------- ##
 
-# 7. Flatten the 2D grid matrices into 1D columns for the table
-x_flat = X.flatten()
-y_flat = Y.flatten()
-func_flat = func_grid.flatten()
-
-# 8. Create a structured Pandas DataFrame for the entire grid landscape
-df_grid_evaluations = pd.DataFrame({
-    'X': x_flat,
-    'Y': y_flat,
-    'F': func_flat
-})
-
-# 9. Save to a CSV file
-output_filename = f'tables/uniform_grid_func_evals/uniform_evaluations-{resolution}.csv'
-df_grid_evaluations.to_csv(output_filename, index=False)
-
-print(f"Saved all {len(df_grid_evaluations):,} grid points to '{output_filename}'\n---")
