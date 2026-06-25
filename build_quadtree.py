@@ -25,17 +25,17 @@ max_depth = 6
 def load_hdf5_table(file_path):
      
     with h5py.File(file_path, "r") as f:
-        X_raw = f["den"][:]
-        Y_raw = f["temp"][:]
+        X = f["den"][:]
+        Y = f["temp"][:]
         F = f["Table_Values"]["f"][:]
 
-    # Build tree in log10-space to better resolve multi-decade behavior.
+    # Build tree in log10-space for Hemholtz function.
     # X = np.log10(X_raw)
     # Y = np.log10(Y_raw)
 
     # den varies along columns, temp varies along rows
-    x_coords = X_raw[:, 0]
-    y_coords = Y_raw[0, :]
+    x_coords = X[:, 0]
+    y_coords = Y[0, :]
     global_values = F.ravel()
     global_points = np.column_stack((X_raw.ravel(), Y_raw.ravel()))
 
@@ -56,9 +56,7 @@ def evaluate_quad_error(
     """
     Compute error of local polynomial approximation on a cell.
     """
-    # --------------------------------------------------
-    # Step 1: build corner grid (4x4)
-    # --------------------------------------------------
+    # Build corner grid (4x4)
     num_of_points = 4
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
@@ -81,10 +79,6 @@ def evaluate_quad_error(
     testing_pts = global_points[mask]
     testing_vals = global_values[mask]
 
-    if testing_pts.shape[0] == 0:
-        raise ValueError("No points found in cell for error evaluation.")
-
-    
     #Evaluate polynomial (Using C++ implementation for speed)
     interp_vals = np.array([
         polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
@@ -111,13 +105,9 @@ class QuadTreeNode:
     def evaluate(self, x, y, assume_internal_coords=False):
         """Navigate tree and evaluate polynomial at (x, y)."""
         # if not assume_internal_coords and self.input_space == "log10":
+        # Needed for Hemholtz 
         #     x = np.log10(x)
         #     y = np.log10(y)
-
-        if self.is_leaf:
-            if self.coefficients is None:
-                raise ValueError("Leaf node has no coefficients")
-            return polyinterp.evaluate_polynomial(self.coefficients, x, y, self.bounds)
         
         # Navigate to correct child quadrant
         x_mid, y_mid = self.split_point
@@ -332,7 +322,6 @@ def load_quadtree(filepath):
         if sw_idx >= 0:
             nodes[i].children['SW'] = nodes[sw_idx]
     
-    # print(f"Loaded quadtree from: {filepath}")
     return nodes[0] if nodes else None
 
 if __name__ == "__main__":
