@@ -4,7 +4,10 @@ This branch is the same as the `hdf5` branch, but with with the intention of ver
 
 - I built a uniform table of evaluations of the function `f` on a 128x128 and 256x256 grid, and saved it to an HDF5 file.
 - I built a quadtree from the 128x128 table, and saved it to a `.npz` file.
-- I wrote a script to evaluate the quadtree at 100,000 random points, and compare the results to the 256x256 table. The error is calculated as the absolute difference between the quadtree evaluation and the reference evaluation.
+- I wrote a script to evaluate the quadtree at 100,000 random points, and
+  compare the results to the 256x256 table. The error is calculated as the
+  absolute difference between the quadtree evaluation and the reference
+  evaluation.
 
 ## Tree parameters
 - Max depth: 6
@@ -27,7 +30,9 @@ HDF5 files and no knowledge of the function when evaluating error -- only a fine
 - Resolution of reference table: 256x256
 - Number of points sampled: 100,000
 
-These results are similar to what is seen on the `main` branch when the true function is used to evaluate the error, which suggests that the quadtree is working properly.
+These results are similar to what is seen on the `main` branch when the true
+function is used to evaluate the error, which suggests that the quadtree is
+working properly.
 
 ### Results from `main` branch: 
 Knoweldge of the true function that is being evaluated to compute relative error.
