@@ -6,8 +6,10 @@ import polyinterp
 from scipy.interpolate import RegularGridInterpolator
 import h5py
 
-# Build an adaptive quadtree from a uniform data table, without assuming access
-# to the underlying analytical function that produced the table.
+"""
+Build an adaptive quadtree from a uniform data table, without assuming access
+to the underlying analytical function that produced the table.
+"""
 
 hdf5_table = "../hdf5_data/uniform_evaluations-128.hdf5"
 input_resolution = 128
@@ -21,17 +23,13 @@ input_resolution = 128
 def load_hdf5(file_path):
 
     with h5py.File(file_path, "r") as f:
-        X_raw = f["den"][:]
-        Y_raw = f["temp"][:]
+        X = f["den"][:]
+        Y = f["temp"][:]
         F = f["Table_Values"]["f"][:]
 
-    # Build tree in log10-space to better resolve multi-decade behavior.
-    # X = np.log10(X_raw)
-    # Y = np.log10(Y_raw)
-
     # den varies along columns, temp varies along rows
-    x_coords = X_raw[:, 0]
-    y_coords = Y_raw[0, :]
+    x_coords = X[:, 0]
+    y_coords = Y[0, :]
     global_values = F.ravel()
     global_points = np.column_stack((X_raw.ravel(), Y_raw.ravel()))
 
@@ -54,9 +52,7 @@ def evaluate_quad_error(
     Compute error of local polynomial approximation on a cell.
     """
 
-    # --------------------------------------------------
-    # Step 1: build corner grid (4x4)
-    # --------------------------------------------------
+    # Build corner grid (4x4)
     num_of_points = 4
     x_corner = np.linspace(xmin, xmax, num_of_points)
     y_corner = np.linspace(ymin, ymax, num_of_points)
@@ -67,9 +63,7 @@ def evaluate_quad_error(
     # Ground truth at grid nodes (this is fine to keep)
     corner_vals = source_interpolator(corner_points).reshape(num_of_points, num_of_points)
 
-    # --------------------------------------------------
-    # Step 2: find testing points inside cell
-    # --------------------------------------------------
+    # Find testing points inside cell
     x_coords = global_points[:, 0]
     y_coords = global_points[:, 1]
 
@@ -84,18 +78,14 @@ def evaluate_quad_error(
     if testing_pts.shape[0] == 0:
         raise ValueError("No points found in cell for error evaluation.")
 
-    # --------------------------------------------------
-    # Step 3: evaluate polynomial (FIXED PART)
-    # --------------------------------------------------
+    # Evaluate polynomial (Using C++ implementation)
     interp_vals = np.array([
         polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
         for x, y in testing_pts
     ])
 
-    # --------------------------------------------------
-    # Step 4: compute error
-    # --------------------------------------------------
-    err = np.abs(interp_vals - testing_vals)
+    # Compute relative error
+    err = np.abs(interp_vals - testing_vals) / np.abs(testing_vals)
     linf_norm = np.max(err)
 
     return linf_norm, corner_vals
@@ -112,10 +102,6 @@ class QuadTreeNode:
     
     def evaluate(self, x, y):
         """Navigate tree and evaluate polynomial at (x, y)."""
-        if self.is_leaf:
-            if self.coefficients is None:
-                raise ValueError("Leaf node has no coefficients")
-            return polyinterp.evaluate_polynomial(self.coefficients, x, y, self.bounds)
         
         # Navigate to correct child quadrant
         xmin, xmax, ymin, ymax = self.bounds
@@ -203,7 +189,7 @@ def build_quadtree(
     except ValueError:
         # No table samples fell inside this cell.        
         print("\n" + "+" * 60)
-        print("No points from input table fell in this cell!\nConsider lowering max depth or error threshold, or increase training resolution. Exiting program...")
+        print("No points from input table fell in this cell!\nConsider lowering max depth or error threshold, or increase training resolution. \nExiting program...")
         sys.exit("+" * 60)
     
     # Check stopping criteria
