@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-import polyinterp 
+from cpp import polyinterp 
 from scipy.interpolate import RegularGridInterpolator
 import h5py
 
