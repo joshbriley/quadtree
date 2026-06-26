@@ -1,11 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
 from cpp import polyinterp 
 from scipy.interpolate import RegularGridInterpolator
 import h5py
 import time
-
+import sys
 
 """
 Adaptive quadtree builder for tabulated HDF5 data.
@@ -30,6 +29,7 @@ with h5py.File(hdf5_file, "r") as f:
 max_depth = int((np.log(ds_size/ppc))/np.log(4)) # For training_data.hdf5 this is 10 
 # max_depth = 2
 print(f"Max Depth: {max_depth}")
+import sys
 
 # Load HDF5 table
 def load_hdf5_table(file_path):
