@@ -4,6 +4,7 @@ import sys
 import polyinterp 
 from scipy.interpolate import RegularGridInterpolator
 import h5py
+import time
 
 
 """
@@ -15,9 +16,11 @@ Supports:
 - fast local polynomial evaluation
 """
 
+start_time = time.perf_counter()
+
 # Config parameters
 hdf5_file = "../hdf5_data/training_data.hdf5"
-error_threshold = 1e-4
+error_threshold = 1e-3
 ppc = 4 # Minimum desired points per cell
 
 with h5py.File(hdf5_file, "r") as f:
@@ -25,6 +28,7 @@ with h5py.File(hdf5_file, "r") as f:
     ds_size = ds.size
 
 max_depth = int((np.log(ds_size/ppc))/np.log(4)) # For training_data.hdf5 this is 10 
+# max_depth = 2
 print(f"Max Depth: {max_depth}")
 
 # Load HDF5 table
@@ -361,3 +365,6 @@ if __name__ == "__main__":
     quadtree_file = f"tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}.npz"
     save_quadtree(quadtree_root, quadtree_file)
     
+    end_time = time.perf_counter()
+    execution_time = end_time - start_time
+    print(f"Execution time: {execution_time:.6f} seconds")
