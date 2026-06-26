@@ -19,7 +19,7 @@ start_time = time.perf_counter()
 
 # Config parameters
 hdf5_file = "../hdf5_data/training_data.hdf5"
-error_threshold = 1e-3
+error_threshold = 1e-1
 ppc = 4 # Minimum desired points per cell
 
 with h5py.File(hdf5_file, "r") as f:
