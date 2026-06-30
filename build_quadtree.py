@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from cpp import polyinterp 
-from scipy.interpolate import RegularGridInterpolator
+# from cpp import polyinterp # HPCC 
+import polyinterp # Local
 import h5py
 import time
 import sys
@@ -19,17 +19,16 @@ start_time = time.perf_counter()
 
 # Config parameters
 hdf5_file = "../hdf5_data/training_data.hdf5"
-error_threshold = 1e-1
+error_threshold = 1e-2
 ppc = 4 # Minimum desired points per cell
+# max_depth = 5 # Maximum depth of quadtree
 
 with h5py.File(hdf5_file, "r") as f:
     ds = f["den"][:] # Assuming den, temp, and f are all the same dimension
     ds_size = ds.size
 
 max_depth = int((np.log(ds_size/ppc))/np.log(4)) # For training_data.hdf5 this is 10 
-# max_depth = 2
-print(f"Max Depth: {max_depth}")
-import sys
+print(f"Max depth calculated from training data: {max_depth}")
 
 # Load HDF5 table
 def load_hdf5_table(file_path):
@@ -49,35 +48,49 @@ def load_hdf5_table(file_path):
     global_values = F.ravel()
     global_points = np.column_stack((X.ravel(), Y.ravel()))
 
-    global_interpolator = RegularGridInterpolator(
-        (x_coords, y_coords),
-        F.T,
-        method="linear",
-        bounds_error=False,
-        fill_value=np.nan,
-    )
-    return x_coords, y_coords, global_points, global_values, global_interpolator
+    return x_coords, y_coords, global_points, global_values
     
 def evaluate_quad_error(
     xmin, xmax, ymin, ymax,
     global_points, global_values,
-    source_interpolator
+    x_coords, y_coords
 ):
     """
     Compute error of local polynomial approximation on a cell.
     """
-    # Build corner grid (4x4)
+    # Build interpolation nodes in index-space so they always lie on the training grid.
     num_of_points = 4
-    x_corner = np.linspace(xmin, xmax, num_of_points)
-    y_corner = np.linspace(ymin, ymax, num_of_points)
+    table_2d = global_values.reshape(len(y_coords), len(x_coords))
 
-    x_mesh, y_mesh = np.meshgrid(x_corner, y_corner, indexing="ij")
-    corner_points = np.column_stack((x_mesh.ravel(), y_mesh.ravel()))
+    ix0 = np.searchsorted(x_coords, xmin, side="left")
+    ix1 = np.searchsorted(x_coords, xmax, side="right") - 1
+    iy0 = np.searchsorted(y_coords, ymin, side="left")
+    iy1 = np.searchsorted(y_coords, ymax, side="right") - 1
 
-    # Ground truth at grid nodes
-    corner_vals = source_interpolator(corner_points).reshape(num_of_points, num_of_points)
+    ix0 = int(np.clip(ix0, 0, len(x_coords) - 1))
+    ix1 = int(np.clip(ix1, 0, len(x_coords) - 1))
+    iy0 = int(np.clip(iy0, 0, len(y_coords) - 1))
+    iy1 = int(np.clip(iy1, 0, len(y_coords) - 1))
 
-    # Find testing points inside cell
+    if ix1 < ix0:
+        ix0, ix1 = ix1, ix0
+    if iy1 < iy0:
+        iy0, iy1 = iy1, iy0
+
+    x_ids = np.linspace(ix0, ix1, num_of_points)
+    y_ids = np.linspace(iy0, iy1, num_of_points)
+    x_ids = np.rint(x_ids).astype(int)
+    y_ids = np.rint(y_ids).astype(int)
+
+    # Ensure monotonic index order and exactly 4 entries.
+    x_ids = np.sort(x_ids)
+    y_ids = np.sort(y_ids)
+
+    # table_2d uses [y, x]; transpose to keep corner_vals indexed as [x, y]
+    # to match evaluate_polynomial usage in the C++ extension.
+    corner_vals = table_2d[np.ix_(y_ids, x_ids)].T
+
+    # Find training points inside cell
     x_coords = global_points[:, 0]
     y_coords = global_points[:, 1]
 
@@ -86,21 +99,20 @@ def evaluate_quad_error(
         (y_coords >= ymin) & (y_coords <= ymax)
     )
 
-    testing_pts = global_points[mask]
-    testing_vals = global_values[mask]
+    training_pts = global_points[mask]
+    training_vals = global_values[mask]
 
-    if testing_pts.shape[0] == 0:
-        raise ValueError("No points found in cell for error evaluation.")
-
+    if training_pts.shape[0] == 0:
+        input("--- ERROR! ---\nNo points in cell for error evaluation.\n ---ERROR!---\n")
     
-    # Evaluate polynomial (Using C++ implementation for speed)
+    # Evaluate polynomial Lagrange interpolant (Using C++ implementation for speed)
     interp_vals = np.array([
         polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax))
-        for x, y in testing_pts
+        for x, y in training_pts
     ])
 
     # Compute relative error
-    err = np.abs(interp_vals - testing_vals) / (np.abs(testing_vals) + 1e-12)  # Avoid division by zero
+    err = np.abs(interp_vals - training_vals) / (np.abs(training_vals) + 1e-12)
     linf_norm = np.max(err)
 
     return linf_norm, corner_vals
@@ -190,8 +202,9 @@ def build_quadtree(
     error_threshold,
     max_depth,
     global_points,
-    global_valuesuess,
-    source_interpolator,
+    global_values,
+    x_coords,
+    y_coords,
     depth=0,
 ):
     """Recursively build adaptive quadtree based on interpolation error."""
@@ -206,8 +219,9 @@ def build_quadtree(
             ymin,
             ymax,
             global_points,
-            global_valuesuess,
-            source_interpolator,
+            global_values,
+            x_coords,
+            y_coords,
         )
     except ValueError:
         # No table samples fell inside this cell.        
@@ -219,6 +233,7 @@ def build_quadtree(
     if error <= error_threshold or depth >= max_depth:
         node.is_leaf = True
         node.coefficients = coeffs
+        print(f"Leaf node at depth {depth}, error={error:.3e}")
         return node
     
     # Split cell into 4 quadrants
@@ -242,8 +257,9 @@ def build_quadtree(
             error_threshold,
             max_depth,
             global_points,
-            global_valuesuess,
-            source_interpolator,
+            global_values,
+            x_coords,
+            y_coords,
             depth + 1,
         )
     
@@ -344,7 +360,7 @@ def load_quadtree(filepath):
     return nodes[0] if nodes else None
 
 if __name__ == "__main__":
-    x_coords, y_coords, global_points, global_values, source_interpolator = load_hdf5_table(hdf5_file)
+    x_coords, y_coords, global_points, global_values = load_hdf5_table(hdf5_file)
     domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
     domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
     train_resolution = len(x_coords)
@@ -359,7 +375,8 @@ if __name__ == "__main__":
         max_depth,
         global_points,
         global_values,
-        source_interpolator,
+        x_coords,
+        y_coords, 
     )
 
     quadtree_file = f"tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}.npz"

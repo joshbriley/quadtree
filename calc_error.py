@@ -1,6 +1,7 @@
 import numpy as np
 import h5py
 import os
+import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from build_quadtree import load_quadtree
 
@@ -73,27 +74,56 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
     return l1, l2, linf, size_kb
 
 
+def plot_error_norms(size_kb, l1, l2, linf):
+    order = np.argsort(size_kb)
+    size_kb = size_kb[order]
+    l1 = l1[order]
+    l2 = l2[order]
+    linf = linf[order]
+
+    plt.figure(figsize=(8, 6))
+    plt.loglog(size_kb, l1, marker="o", linewidth=2, label=r"$L_1$")
+    plt.loglog(size_kb, l2, marker="s", linewidth=2, label=r"$L_2$")
+    plt.loglog(size_kb, linf, marker="^", linewidth=2, label=r"$L_\infty$")
+    plt.xlabel("Table size (kB)")
+    plt.ylabel("Relative error norm")
+    plt.title("Error vs Table Size")
+    plt.grid(True, which="both", linestyle="--", alpha=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("ErrorVsSize.png", dpi=500)
+    plt.show()
+
 if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_file = "tables/quadtree-10-0.0001-4321.npz" # Quadtree file to evaluate
+    tree_files = ["tables/quadtree-10-0.1-4321.npz",
+                  "tables/quadtree-10-0.01-4321.npz",]
+                #   "tables/quadtree-10-0.01-4321.npz",
+                #   "tables/quadtree-10-0.001-4321.npz",
+                #   "tables/quadtree-10-0.0001-4321.npz",]
     n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values
     ref_points, ref_values, ref_interp = load_reference_hdf5(test_file)
+    l1 = np.zeros(len(tree_files))
+    l2 = np.zeros(len(tree_files))
+    linf = np.zeros(len(tree_files))
+    size_kb = np.zeros(len(tree_files))
     
     # Compute the error norms for the quadtree at random points
-    l1, l2, linf, size_kb = compute_quadtree_error(
-        tree_file, ref_points, ref_values, 
-        n_points=n_random_points,
-        random_seed=None
-    )
+    for i in range(len(tree_files)):
+        l1[i], l2[i], linf[i], size_kb[i] = compute_quadtree_error(tree_files[i], ref_points, ref_values, n_points=n_random_points,random_seed=42)
 
-    print("\n+-- Quadtree Relative Error --+")
-    print(f"| L1   : {l1:.3e}")
-    print(f"| L2   : {l2:.3e}")
-    print(f"| Linf : {linf:.3e}")
-    print(f"| Size : {size_kb:.2f} kB")
-    print("+-----------------------------+")
-    print(f"Number of random points evaluated: {n_random_points:.1e}\n")
+        print("\n+-- Quadtree Relative Error --+")
+        print(f"| L1   : {l1[i]:.5e}")
+        print(f"| L2   : {l2[i]:.5e}")
+        print(f"| Linf : {linf[i]:.5e}")
+        print(f"| Size : {size_kb[i]:.2f} kB")
+        print("+-----------------------------+")
+        print(f"Number of random points evaluated: {n_random_points:.1e}")
+        print(f"Quadtree file: {tree_files[i]}\n")
+
+    plot_error_norms(size_kb, l1, l2, linf)
+

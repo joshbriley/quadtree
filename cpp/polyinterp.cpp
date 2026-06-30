@@ -9,6 +9,13 @@ double evaluate_polynomial(
     double y,
     py::array_t<double> bounds
 ) {
+    if (vals.ndim() != 2 || vals.shape(0) != 4 || vals.shape(1) != 4) {
+        throw py::value_error("vals must be a 4x4 array");
+    }
+    if (bounds.ndim() != 1 || bounds.shape(0) != 4) {
+        throw py::value_error("bounds must be a 1D array of length 4: [xmin, xmax, ymin, ymax]");
+    }
+
     auto v = vals.unchecked<2>();   // fast NumPy access
     auto b = bounds.unchecked<1>();
 
@@ -16,6 +23,10 @@ double evaluate_polynomial(
     double xmax = b(1);
     double ymin = b(2);
     double ymax = b(3);
+
+    if (xmax == xmin || ymax == ymin) {
+        throw py::value_error("Cell bounds are degenerate");
+    }
 
     // Normalize
     double tx = (x - xmin) / (xmax - xmin);
