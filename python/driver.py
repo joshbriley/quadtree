@@ -78,7 +78,7 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
         # Save quadtree
         # ------------------------------------------------------
         output_file = (
-            f"tables/quadtree-{max_depth}-{thresh:.1e}-{resolution}.npz"
+            f"tables/quadtree-{max_depth}-{thresh:.1e}-{resolution}.h5"
         )
 
         save_quadtree(root, output_file)

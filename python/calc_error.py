@@ -98,11 +98,11 @@ if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_files = ["tables/quadtree-10-0.1-4321.npz",
-                  "tables/quadtree-10-0.01-4321.npz",]
-                #   "tables/quadtree-10-0.01-4321.npz",
-                #   "tables/quadtree-10-0.001-4321.npz",
-                #   "tables/quadtree-10-0.0001-4321.npz",]
+    tree_files = ["tables/quadtree-10-0.1-4321.h5",
+                  "tables/quadtree-10-0.01-4321.h5",]
+                #   "tables/quadtree-10-0.01-4321.h5",
+                #   "tables/quadtree-10-0.001-4321.h5",
+                #   "tables/quadtree-10-0.0001-4321.h5",]
     n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values

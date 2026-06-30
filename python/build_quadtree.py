@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
-# from cpp import polyinterp # HPCC 
-import polyinterp # Local
+from cpp import polyinterp # HPCC 
 import h5py
 import time
 import sys
+import os
 
 """
 Adaptive quadtree builder for tabulated HDF5 data.
@@ -21,7 +21,7 @@ start_time = time.perf_counter()
 hdf5_file = "../hdf5_data/training_data.hdf5"
 error_threshold = 1e-2
 ppc = 4 # Minimum desired points per cell
-# max_depth = 5 # Maximum depth of quadtree
+# max_depth = 1 # Maximum depth of quadtree
 
 with h5py.File(hdf5_file, "r") as f:
     ds = f["den"][:] # Assuming den, temp, and f are all the same dimension
@@ -266,7 +266,12 @@ def build_quadtree(
     return node
 
 def save_quadtree(quadtree_root, filepath):
-    """Save quadtree to compressed NPZ file using flattened structure."""
+    """Save quadtree to HDF5 file using flattened structure."""
+    filepath = os.path.expandvars(filepath)
+    output_dir = os.path.dirname(filepath)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
     nodes_list = []
     quadtree_root._flatten_to_list(nodes_list, {})
     
@@ -296,44 +301,49 @@ def save_quadtree(quadtree_root, filepath):
     for i, node_data in enumerate(nodes_list):
         if node_data['coefficients'] is not None:
             values_dict[f'vals_{i}'] = node_data['coefficients']
-    
-    # Save as NPZ with compression
-    np.savez_compressed(
-        filepath,
-        format='quadtree_v1',
-        coord_space=np.array(['log10']),
-        num_nodes=np.array([len(nodes_list)]),
-        bounds=np.array(bounds_list, dtype=np.float32),
-        is_leaf=np.array(is_leaf_list, dtype=bool),
-        split_points=np.array(split_points_list, dtype=np.float32),
-        child_indices=np.array(child_indices_list, dtype=np.int32),
-        **values_dict
-    )
+
+    # Save as HDF5
+    with h5py.File(filepath, "w") as f:
+        f.attrs["format"] = "quadtree_v1"
+        f.attrs["coord_space"] = "log10"
+        f.create_dataset("num_nodes", data=np.array([len(nodes_list)], dtype=np.int32))
+        f.create_dataset("bounds", data=np.array(bounds_list, dtype=np.float32))
+        f.create_dataset("is_leaf", data=np.array(is_leaf_list, dtype=bool))
+        f.create_dataset("split_points", data=np.array(split_points_list, dtype=np.float32))
+        f.create_dataset("child_indices", data=np.array(child_indices_list, dtype=np.int32))
+
+        values_group = f.create_group("values")
+        for key, coeffs in values_dict.items():
+            values_group.create_dataset(key, data=coeffs)
+
     print(f"Saved quadtree to: {filepath}")
 
 def load_quadtree(filepath):
-    """Load quadtree from compressed NPZ file."""
-    data = np.load(filepath)
+    """Load quadtree from HDF5 file."""
+    with h5py.File(filepath, "r") as data:
+        coord_space = str(data.attrs.get("coord_space", "linear"))
 
-    coord_space = str(data['coord_space'][0]) if 'coord_space' in data else 'linear'
-    
-    num_nodes = int(data['num_nodes'][0]) if 'num_nodes' in data else len(data['bounds'])
-    bounds_list = data['bounds']
-    is_leaf_list = data['is_leaf']
-    split_points_list = data['split_points']
-    child_indices_list = data['child_indices']
-    
-    # Reconstruct nodes
-    nodes_list = []
-    for i in range(num_nodes):
-        node_data = {
-            'bounds': tuple(bounds_list[i]),
-            'is_leaf': bool(is_leaf_list[i]),
-            'split_point': tuple(split_points_list[i]) if not is_leaf_list[i] else None,
-            'coefficients': data[f'vals_{i}'] if f'vals_{i}' in data else None,
-            'child_indices': {}
-        }
-        nodes_list.append(node_data)
+        num_nodes = int(data["num_nodes"][0]) if "num_nodes" in data else len(data["bounds"])
+        bounds_list = data["bounds"][:]
+        is_leaf_list = data["is_leaf"][:]
+        split_points_list = data["split_points"][:]
+        child_indices_list = data["child_indices"][:]
+
+        values_group = data["values"] if "values" in data else None
+
+        # Reconstruct nodes
+        nodes_list = []
+        for i in range(num_nodes):
+            coeff_key = f"vals_{i}"
+            coeffs = values_group[coeff_key][:] if values_group is not None and coeff_key in values_group else None
+            node_data = {
+                'bounds': tuple(bounds_list[i]),
+                'is_leaf': bool(is_leaf_list[i]),
+                'split_point': tuple(split_points_list[i]) if not is_leaf_list[i] else None,
+                'coefficients': coeffs,
+                'child_indices': {}
+            }
+            nodes_list.append(node_data)
     
     # Reconstruct tree using flattened list
     nodes = []
@@ -379,7 +389,7 @@ if __name__ == "__main__":
         y_coords, 
     )
 
-    quadtree_file = f"tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}.npz"
+    quadtree_file = f"/mnt/gs21/scratch/brileyjo/tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}.h5"
     save_quadtree(quadtree_root, quadtree_file)
     
     end_time = time.perf_counter()
