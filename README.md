@@ -2,6 +2,11 @@
 
 An efficient surrogate model builder for tabulated data spanning many orders of magnitude.
 
+Important: Must run from the quadtree root directory, not the `python/` subdirectory. An example command is:
+```bash
+python -m python.build_quadtree
+```
+
 ## Overview
 
 This project builds an adaptive quadtree from dense HDF5 tables and evaluates surrogate accuracy by comparing quadtree interpolation against reference data.
