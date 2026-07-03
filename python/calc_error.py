@@ -3,7 +3,7 @@ import h5py
 import os
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
-from build_quadtree import load_quadtree
+from python.build_quadtree import load_quadtree
 
 # Load fine reference data
 def load_reference_hdf5(file_path):
@@ -34,7 +34,13 @@ def load_reference_hdf5(file_path):
     return ref_points, ref_values, ref_interp
 
 # Compute errors by comparing the quadtree table to the (denser) testing data table
-def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None, random_seed=None):
+def compute_quadtree_error(
+    quadtree_file,
+    ref_points,
+    ref_values,
+    n_points=None,
+    random_seed=None,
+    rel_floor=1e-6,):
     """
     Evaluate quadtree error at reference points.
     
@@ -53,7 +59,12 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
     if random_seed is not None:
         np.random.seed(random_seed)
         
-    indices = np.random.choice(len(ref_points), size=min(n_points, len(ref_points)), replace=False)
+    if n_points is None:
+        n_eval = len(ref_points)
+    else:
+        n_eval = min(int(n_points), len(ref_points))
+
+    indices = np.random.choice(len(ref_points), size=n_eval, replace=False)
     ref_points_sub = ref_points[indices]
     ref_values_sub = ref_values[indices]
     
@@ -63,10 +74,13 @@ def compute_quadtree_error(quadtree_file, ref_points, ref_values, n_points=None,
         qt_at_ref[i] = root.evaluate(x, y)
 
     # Compute relative error norms
-    error = (qt_at_ref - ref_values_sub) / (np.abs(ref_values_sub) + 1e-12)  # Avoid division by zero
-    l1 = np.mean(np.abs(error))
-    l2 = np.sqrt(np.mean(error**2))
-    linf = np.max(np.abs(error))
+    # scale = max(float(np.max(np.abs(ref_values_sub))), 1e-30)
+    # denom = np.maximum(np.abs(ref_values_sub), rel_floor * scale)
+    # error = (qt_at_ref - ref_values_sub) / denom
+    err = np.abs(qt_at_ref - ref_values_sub) / (np.abs(ref_values_sub))
+    l1 = np.mean(np.abs(err))
+    l2 = np.sqrt(np.mean(err**2))
+    linf = np.max(np.abs(err))
 
     # Compute size of the quadtree file
     size_kb = os.path.getsize(quadtree_file) / 1024
@@ -88,6 +102,7 @@ def plot_error_norms(size_kb, l1, l2, linf):
     plt.xlabel("Table size (kB)")
     plt.ylabel("Relative error norm")
     plt.title("Error vs Table Size")
+    plt.figtext(0.5, 0.01, "\nD_max = 5, error threshold = 0.001 | D_max = 7, error threshold = 0.01 |\nD_max = 8, error threshold = 0.01 | D_max = 9, error threshold = 0.01 | D_max = 10, error threshold = 0.01", ha="center", fontsize=8)
     plt.grid(True, which="both", linestyle="--", alpha=0.5)
     plt.legend()
     plt.tight_layout()
@@ -98,8 +113,11 @@ if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_files = ["tables/quadtree-10-0.1-4321.h5",
-                  "tables/quadtree-10-0.01-4321.h5",]
+    tree_files = ["tables/quadtree-5-0.001-4321.h5",
+                  "tables/quadtree-7-0.01-4321.h5",
+                  "tables/quadtree-8-0.01-4321.h5",
+                  "tables/quadtree-9-0.01-4321.h5",
+                  "tables/quadtree-10-0.01-4321-new.h5",]
                 #   "tables/quadtree-10-0.01-4321.h5",
                 #   "tables/quadtree-10-0.001-4321.h5",
                 #   "tables/quadtree-10-0.0001-4321.h5",]
@@ -114,7 +132,7 @@ if __name__ == "__main__":
     
     # Compute the error norms for the quadtree at random points
     for i in range(len(tree_files)):
-        l1[i], l2[i], linf[i], size_kb[i] = compute_quadtree_error(tree_files[i], ref_points, ref_values, n_points=n_random_points,random_seed=42)
+        l1[i], l2[i], linf[i], size_kb[i] = compute_quadtree_error(tree_files[i], ref_points, ref_values, n_points=n_random_points, random_seed=1)
 
         print("\n+-- Quadtree Relative Error --+")
         print(f"| L1   : {l1[i]:.5e}")

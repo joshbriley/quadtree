@@ -1,6 +1,7 @@
 import argparse
 import time
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
 
 from build_quadtree import (
     load_hdf5_table,
@@ -28,12 +29,19 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
         y_coords,
         global_points,
         global_vals,
-        source_interpolator,
     ) = load_hdf5_table(csv_path)
 
     xmin, xmax = float(x_coords.min()), float(x_coords.max())
     ymin, ymax = float(y_coords.min()), float(y_coords.max())
     resolution = len(x_coords)
+
+    table_interp = RegularGridInterpolator(
+        (x_coords, y_coords),
+        global_vals.reshape(len(y_coords), len(x_coords)).T,
+        method="linear",
+        bounds_error=False,
+        fill_value=None,
+    )
 
     # # ----------------------------------------------------------
     # # Build test grid (for error computation)
@@ -68,7 +76,9 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
             max_depth,
             global_points,
             global_vals,
-            source_interpolator,
+            x_coords,
+            y_coords,
+            table_interp,
         )
 
         build_time = time.time() - t0

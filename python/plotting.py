@@ -3,10 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import h5py
 from scipy.interpolate import RegularGridInterpolator
-try:
-    from .build_quadtree import load_quadtree
-except ImportError:
-    from build_quadtree import load_quadtree
+from python.build_quadtree import load_quadtree
 
 def get_leaf_cells(h5_file):
     with h5py.File(h5_file, "r") as data:
@@ -31,7 +28,7 @@ def get_leaf_cells(h5_file):
     return leaf_cells
 
 
-def plot_decomp(cells, output="figs/quadtree_decomp-0.1.png"):
+def plot_decomp(cells, output="figs/quadtree_decomp-7-0.0001.png"):
     fig, ax = plt.subplots(figsize=(8, 6))
 
     for xmin, xmax, ymin, ymax in cells:
@@ -77,7 +74,7 @@ def plot_heatmap(test_file, output="figs/heatmap.png"):
     plt.savefig(output, dpi=300)
     plt.close()
 
-def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e6), random_seed=42, output="figs/error_heatmap.png"):
+def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e6), random_seed=42, output="figs/error_heatmap-7-0.0001.png"):
     # Load quadtree object for robust evaluation
     quadtree = load_quadtree(quadtree_file)
 
@@ -117,16 +114,16 @@ def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e6), random_seed=
         value_qt = quadtree.evaluate(x, y)
         true_value = float(true_interp((x, y)))
         rel_err = np.abs(value_qt - true_value) / (np.abs(true_value) + 1e-12)
+        # print(f"Point {i}: x={x:.3e}, y={y:.3e}, qt={value_qt:.3e}, true={true_value:.3e}, rel_err={rel_err:.3e}")
         error[i] = np.log10(rel_err + 1e-30)
 
     x_plot = np.log10(x_random)
     y_plot = np.log10(y_random)
-    print(f"X plot range: {x_plot.min()} to {x_plot.max()}")
-    print(f"Y plot range: {y_plot.min()} to {y_plot.max()}")
+    # print(f"X plot range: {x_plot.min()} to {x_plot.max()}")
+    # print(f"Y plot range: {y_plot.min()} to {y_plot.max()}")
 
     # Plot the error heatmap
     plt.figure(figsize=(15, 6))
-    # plt.hexbin(x_plot, y_plot, C=error, gridsize=50, cmap="viridis", reduce_C_function=np.mean)
     plt.scatter(x_plot, y_plot, c=error, cmap="viridis", s=1, alpha=0.5)
     plt.colorbar(label="log10(relative error)")
     plt.xlabel("log10(Density)")
@@ -137,11 +134,11 @@ def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e6), random_seed=
     plt.close()
 
 if __name__ == "__main__":
-    tree_file = "tables/quadtree-10-0.1-4321.h5"
+    tree_file = "tables/quadtree-7-0.0001-4321.h5"
     test_file = "../hdf5_data/testing_data.hdf5"
 
-    # cells = get_leaf_cells(tree_file)
-    # plot_decomp(cells)
+    cells = get_leaf_cells(tree_file)
+    plot_decomp(cells)
     # plot_heatmap(test_file)
     plot_error_heatmap(tree_file, test_file)
 
