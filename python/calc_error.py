@@ -77,32 +77,31 @@ def compute_quadtree_error(
     # scale = max(float(np.max(np.abs(ref_values_sub))), 1e-30)
     # denom = np.maximum(np.abs(ref_values_sub), rel_floor * scale)
     # error = (qt_at_ref - ref_values_sub) / denom
-    err = np.abs(qt_at_ref - ref_values_sub) / (np.abs(ref_values_sub))
+    err = np.abs(10**qt_at_ref - ref_values_sub) / (np.abs(ref_values_sub))
     l1 = np.mean(np.abs(err))
     l2 = np.sqrt(np.mean(err**2))
     linf = np.max(np.abs(err))
 
     # Compute size of the quadtree file
-    size_kb = os.path.getsize(quadtree_file) / 1024
+    size_mb = os.path.getsize(quadtree_file) / (1024 * 1024)
 
-    return l1, l2, linf, size_kb
+    return l1, l2, linf, size_mb
 
-
-def plot_error_norms(size_kb, l1, l2, linf):
-    order = np.argsort(size_kb)
-    size_kb = size_kb[order]
+def plot_error_norms(size_mb, l1, l2, linf):
+    order = np.argsort(size_mb)
+    size_mb = size_mb[order]
     l1 = l1[order]
     l2 = l2[order]
     linf = linf[order]
 
     plt.figure(figsize=(8, 6))
-    plt.loglog(size_kb, l1, marker="o", linewidth=2, label=r"$L_1$")
-    plt.loglog(size_kb, l2, marker="s", linewidth=2, label=r"$L_2$")
-    plt.loglog(size_kb, linf, marker="^", linewidth=2, label=r"$L_\infty$")
-    plt.xlabel("Table size (kB)")
+    plt.loglog(size_mb, l1, marker="o", linewidth=2, label=r"$L_1$")
+    plt.loglog(size_mb, l2, marker="s", linewidth=2, label=r"$L_2$")
+    plt.loglog(size_mb, linf, marker="^", linewidth=2, label=r"$L_\infty$")
+    plt.xlabel("Table size (MB)")
     plt.ylabel("Relative error norm")
     plt.title("Error vs Table Size")
-    plt.figtext(0.5, 0.01, "\nD_max = 5, error threshold = 0.001 | D_max = 7, error threshold = 0.01 |\nD_max = 8, error threshold = 0.01 | D_max = 9, error threshold = 0.01 | D_max = 10, error threshold = 0.01", ha="center", fontsize=8)
+    plt.figtext(0.5, 0.01, "Consistent D_max = 7, error thresholds = [0.1, 0.01, 0.001, 0.0001, 1e-05] Trained in symlog space.", ha="center", fontsize=8)
     plt.grid(True, which="both", linestyle="--", alpha=0.5)
     plt.legend()
     plt.tight_layout()
@@ -113,35 +112,35 @@ if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_files = ["tables/quadtree-5-0.001-4321.h5",
-                  "tables/quadtree-7-0.01-4321.h5",
-                  "tables/quadtree-8-0.01-4321.h5",
-                  "tables/quadtree-9-0.01-4321.h5",
-                  "tables/quadtree-10-0.01-4321-new.h5",]
+    tree_files = ["tables/quadtree-7-0.1-4321-log.h5",
+                #   "tables/quadtree-7-0.01-4321-log.h5",
+                  "tables/quadtree-7-0.001-4321-log.h5",
+                  "tables/quadtree-7-0.001-4321-log-new.h5",]
+                #   "tables/quadtree-7-1e-05-4321-log.h5",]
                 #   "tables/quadtree-10-0.01-4321.h5",
                 #   "tables/quadtree-10-0.001-4321.h5",
                 #   "tables/quadtree-10-0.0001-4321.h5",]
-    n_random_points = int(1e+5)  # Number of random points to sample for error evaluation
+    n_random_points = int(1e+6)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values
     ref_points, ref_values, ref_interp = load_reference_hdf5(test_file)
     l1 = np.zeros(len(tree_files))
     l2 = np.zeros(len(tree_files))
     linf = np.zeros(len(tree_files))
-    size_kb = np.zeros(len(tree_files))
+    size_mb = np.zeros(len(tree_files))
     
     # Compute the error norms for the quadtree at random points
     for i in range(len(tree_files)):
-        l1[i], l2[i], linf[i], size_kb[i] = compute_quadtree_error(tree_files[i], ref_points, ref_values, n_points=n_random_points, random_seed=1)
+        l1[i], l2[i], linf[i], size_mb[i] = compute_quadtree_error(tree_files[i], ref_points, ref_values, n_points=n_random_points, random_seed=1)
 
         print("\n+-- Quadtree Relative Error --+")
         print(f"| L1   : {l1[i]:.5e}")
         print(f"| L2   : {l2[i]:.5e}")
         print(f"| Linf : {linf[i]:.5e}")
-        print(f"| Size : {size_kb[i]:.2f} kB")
+        print(f"| Size : {size_mb[i]:.2f} MB")
         print("+-----------------------------+")
         print(f"Number of random points evaluated: {n_random_points:.1e}")
         print(f"Quadtree file: {tree_files[i]}\n")
 
-    plot_error_norms(size_kb, l1, l2, linf)
+    plot_error_norms(size_mb, l1, l2, linf)
 

@@ -1,0 +1,4 @@
+Max depth calculated from training data: 10
+Starting Adaptive Quadtree Decomposition...
+Saved quadtree to: /mnt/gs21/scratch/brileyjo/tables/quadtree-10-0.0001-4321.h5
+Execution time: 74937.871569 seconds

@@ -1,11 +1,11 @@
 #!/bin/bash --login
-#SBATCH --job-name=quadtree-10-1e-2-new
-#SBATCH --time=23:59:00
+#SBATCH --job-name=quadtree-7-1e-5-log
+#SBATCH --time=9:59:00
 #SBATCH --mem=8G
 #SBATCH --cpus-per-task=4
 #SBATCH --mail-user=brileyjo@msu.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --output=logs/quadtree_10_1e-2_new.out
+#SBATCH --output=logs/quadtree_7_1e-5_log.out
 
 ml purge
 module load Miniforge3/25.11.0-1

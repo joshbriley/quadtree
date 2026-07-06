@@ -15,9 +15,9 @@ start_time = time.perf_counter()
 
 # Config parameters
 hdf5_file = "../hdf5_data/training_data.hdf5"
-error_threshold = 1e-2
+error_threshold = 1e-3
 # ppc = 4 # Minimum desired points per cell
-max_depth = 10 # Maximum depth of quadtree
+max_depth = 6  # Maximum depth of quadtree
 
 # with h5py.File(hdf5_file, "r") as f:
 #     ds = f["den"][:] # Assuming den, temp, and f are all the same dimension
@@ -25,6 +25,13 @@ max_depth = 10 # Maximum depth of quadtree
 
 # max_depth = int((np.log(ds_size/ppc))/np.log(4)) # For training_data.hdf5 this is 10 
 # print(f"Max depth calculated from training data: {max_depth}")
+
+def symlog(x, linthresh=1.0):
+    # Scale logarithmically outside the linthresh range, linear inside
+    sign = np.sign(x)
+    log_part = np.log10(np.abs(x) / linthresh)
+    return sign * np.where(np.abs(x) > linthresh, log_part, x / linthresh)
+
 
 # Load HDF5 table
 def load_hdf5_table(file_path):
@@ -37,6 +44,7 @@ def load_hdf5_table(file_path):
     # Build tree in log10-space to better resolve multi-decade behavior.
     X = np.log10(X_raw)
     Y = np.log10(Y_raw)
+    F = np.log10(abs(F))
 
     # den varies along columns, temp varies along rows
     x_coords = X[0, :]
@@ -77,7 +85,7 @@ def evaluate_quad_error(
     training_vals = global_values[mask]
 
     if training_pts.shape[0] == 0:
-        input("--- ERROR! ---\nNo points in cell for error evaluation.\n ---ERROR!---\n")
+        input("--- ERROR! ---\nNo points in cell for error evaluation.\n---ERROR!---\n")
     
     # Evaluate polynomial Lagrange interpolant (Using C++ implementation for speed)
     interp_vals = np.array([
@@ -90,9 +98,10 @@ def evaluate_quad_error(
     # denom = np.maximum(np.abs(training_vals), rel_floor * scale)
     # err = np.abs(interp_vals - training_vals) / denom
     # linf_norm = np.max(err)
+    # err = np.abs(symlog(interp_vals) - symlog(training_vals))   / (np.abs(symlog(training_vals)) + 1e-12)
     err = np.abs(interp_vals - training_vals) / (np.abs(training_vals))
     linf_norm = np.max(err)
-    print(f"L_inf norm for cell [{xmin:.3e}, {xmax:.3e}] x [{ymin:.3e}, {ymax:.3e}]: {linf_norm:.3e}")
+    # print(f"L_inf norm for cell [{xmin:.3e}, {xmax:.3e}] x [{ymin:.3e}, {ymax:.3e}]: {linf_norm:.3e}")
 
     return linf_norm, corner_vals
 
@@ -214,7 +223,7 @@ def build_quadtree(
     if error <= error_threshold or depth >= max_depth:
         node.is_leaf = True
         node.coefficients = coeffs
-        # print(f"Leaf node at depth {depth}, error={error:.3e}")
+        # print(f"Maximum error for leaf cell: {error:.3e} \nCell bounds: [{xmin:.3e}, {xmax:.3e}] x [{ymin:.3e}, {ymax:.3e}]\nDepth: {depth}\n")
         return node
     
     # Split cell into 4 quadrants
@@ -379,7 +388,7 @@ if __name__ == "__main__":
         table_interp,
     )
 
-    quadtree_file = f"/mnt/gs21/scratch/brileyjo/tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}.h5"
+    quadtree_file = f"/mnt/home/brileyjo/research/quadtree/tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}-log-new.h5"
     save_quadtree(quadtree_root, quadtree_file)
     
     end_time = time.perf_counter()

@@ -28,7 +28,7 @@ def get_leaf_cells(h5_file):
     return leaf_cells
 
 
-def plot_decomp(cells, output="figs/quadtree_decomp-7-0.0001.png"):
+def plot_decomp(cells, output="figs/quadtree_decomp-6-0.001-log-new-nosymlog.png"):
     fig, ax = plt.subplots(figsize=(8, 6))
 
     for xmin, xmax, ymin, ymax in cells:
@@ -74,7 +74,7 @@ def plot_heatmap(test_file, output="figs/heatmap.png"):
     plt.savefig(output, dpi=300)
     plt.close()
 
-def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e6), random_seed=42, output="figs/error_heatmap-7-0.0001.png"):
+def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e5), random_seed=42, output="figs/error_heatmap-6-0.001-log-new-nosymlog.png"):
     # Load quadtree object for robust evaluation
     quadtree = load_quadtree(quadtree_file)
 
@@ -134,7 +134,7 @@ def plot_error_heatmap(quadtree_file, test_file, n_points=int(1e6), random_seed=
     plt.close()
 
 if __name__ == "__main__":
-    tree_file = "tables/quadtree-7-0.0001-4321.h5"
+    tree_file = "tables/quadtree-6-0.001-4321-log-new.h5"
     test_file = "../hdf5_data/testing_data.hdf5"
 
     cells = get_leaf_cells(tree_file)
