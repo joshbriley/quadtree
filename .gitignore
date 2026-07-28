@@ -1,3 +1,5 @@
 testing_data.hdf5
 
-training_data.hdf5
+training_data.hdf5# pixi environments
+.pixi/*
+!.pixi/config.toml

@@ -5,6 +5,14 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from python.build_quadtree import load_quadtree
 
+def symlog(x, linthresh=1.0, base=10.0):
+    x = np.asarray(x)
+    return np.sign(x) * np.log1p(np.abs(x) / linthresh) / np.log(base)
+
+def inverse_symlog(y, linthresh=1.0, base=10.0):
+    y = np.asarray(y)
+    return np.sign(y) * linthresh * (np.expm1(np.abs(y) * np.log(base)))
+
 # Load fine reference data
 def load_reference_hdf5(file_path):
     with h5py.File(file_path, "r") as f:
@@ -26,6 +34,12 @@ def load_reference_hdf5(file_path):
         bounds_error=False,
         fill_value=np.nan
     )
+
+    # Quick check: evaluate the interpolator at a specific point (for testing purposes)
+    # test_x, test_y = 1.3e-12, 1050  # Example density value, 1050
+    # interpolated_value = ref_interp((test_x, test_y))
+    # print(f"=====\nReference interpolated value at ({test_x:.3e}, {test_y:.3e}): {interpolated_value:.6e}\n=====")
+    # input("Press Enter to continue...")  # Pause for user to see the output
 
     # For compatibility with rest of code, also return flattened points/values
     ref_points = np.column_stack([X.ravel(), Y.ravel()])
@@ -55,6 +69,9 @@ def compute_quadtree_error(
     # Load the quadtree data
     root = load_quadtree(quadtree_file)
 
+    # print("Evaluating sample point:")
+    # print(root.evaluate(ref_points[0,0], ref_points[0,1]))
+
     # Randomly sample n_points
     if random_seed is not None:
         np.random.seed(random_seed)
@@ -67,20 +84,50 @@ def compute_quadtree_error(
     indices = np.random.choice(len(ref_points), size=n_eval, replace=False)
     ref_points_sub = ref_points[indices]
     ref_values_sub = ref_values[indices]
+    # ref_values_sub = symlog(ref_values_sub)  # Transform reference values to symlog space for error computation
+    # print(f"ref_values min: {ref_values_sub.min()}")
+    # print(f"ref_values max: {ref_values_sub.max()}")
     
-    # Evaluate quadtree at subsampled reference points
+    # Evaluate quadtree at subsampled reference points in the same space used
+    # during training: log10 inputs, symlog outputs.
     qt_at_ref = np.empty(len(ref_points_sub))
     for i, (x, y) in enumerate(ref_points_sub):
         qt_at_ref[i] = root.evaluate(x, y)
+        
 
-    # Compute relative error norms
-    # scale = max(float(np.max(np.abs(ref_values_sub))), 1e-30)
-    # denom = np.maximum(np.abs(ref_values_sub), rel_floor * scale)
-    # error = (qt_at_ref - ref_values_sub) / denom
-    err = np.abs(10**qt_at_ref - ref_values_sub) / (np.abs(ref_values_sub))
+    # Compare in symlog space to match the tree output.
+    # ref_values_symlog = symlog(ref_values_sub)
+    # qt_at_ref = inverse_symlog(qt_at_ref)
+    err = np.abs(qt_at_ref - ref_values_sub) / np.abs(ref_values_sub)
+    # print("err min:", err.min())
+    # print("err mean:", err.mean())
+    # print("err max:", err.max())
+
+    # print("99th percentile:", np.percentile(err, 99))
+    # print("99.9th percentile:", np.percentile(err, 99.9))
     l1 = np.mean(np.abs(err))
     l2 = np.sqrt(np.mean(err**2))
     linf = np.max(np.abs(err))
+
+    idx = np.argmax(err)
+
+    x = ref_points_sub[idx,0]
+    y = ref_points_sub[idx,1]
+
+    # print("\nWorst point diagnostics:")
+
+    # print("x =", x)
+    # print("y =", y)
+    # print("tree_symlog =", root.evaluate(x, y))
+    # print("tree_raw =", inverse_symlog(root.evaluate(x, y)))
+    # print("table_interp_raw =", ref_interp([[x, y]])[0])
+    # print("table_interp_symlog =", symlog(ref_interp([[x, y]])[0]))
+    # print("reference_raw =", ref_values_sub[idx])
+    # print("reference_symlog =", ref_values_symlog[idx])
+
+    # print("reference =", ref_values_sub[idx])
+    # print("tree raw  =", root.evaluate(x,y))
+    # print("symlog(ref) =", symlog(ref_values_sub[idx]))
 
     # Compute size of the quadtree file
     size_mb = os.path.getsize(quadtree_file) / (1024 * 1024)
@@ -101,25 +148,26 @@ def plot_error_norms(size_mb, l1, l2, linf):
     plt.xlabel("Table size (MB)")
     plt.ylabel("Relative error norm")
     plt.title("Error vs Table Size")
-    plt.figtext(0.5, 0.01, "Consistent D_max = 7, error thresholds = [0.1, 0.01, 0.001, 0.0001, 1e-05] Trained in symlog space.", ha="center", fontsize=8)
+    plt.figtext(0.5, 0.01, "Consistent D_max = 10, error thresholds = [0.1, 0.01, 0.001, 0.0001, 1e-05] Trained in with symlog error.", ha="center", fontsize=8)
     plt.grid(True, which="both", linestyle="--", alpha=0.5)
     plt.legend()
     plt.tight_layout()
-    plt.savefig("ErrorVsSize.png", dpi=500)
+    plt.savefig("ErrorVsSize-10-symlog-error.png", dpi=500)
     plt.show()
 
 if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_files = ["tables/quadtree-7-0.1-4321-log.h5",
-                #   "tables/quadtree-7-0.01-4321-log.h5",
-                  "tables/quadtree-7-0.001-4321-log.h5",
-                  "tables/quadtree-7-0.001-4321-log-new.h5",]
-                #   "tables/quadtree-7-1e-05-4321-log.h5",]
+    tree_files = ["tables/quadtree-10-0.01-4321-new.h5",
+                  "tables/quadtree-10-0.01-4321-symlog-error.h5",]
+                #   "tables/quadtree-10-0.001-4321-symlog-error.h5",
+                #   "tables/quadtree-10-0.0001-4321-symlog-error.h5",
+                #   "tables/quadtree-10-1e-05-4321-symlog-error.h5",]
                 #   "tables/quadtree-10-0.01-4321.h5",
                 #   "tables/quadtree-10-0.001-4321.h5",
                 #   "tables/quadtree-10-0.0001-4321.h5",]
+
     n_random_points = int(1e+6)  # Number of random points to sample for error evaluation
 
     # Load the test_file to get the test points and reference values
@@ -143,4 +191,3 @@ if __name__ == "__main__":
         print(f"Quadtree file: {tree_files[i]}\n")
 
     plot_error_norms(size_mb, l1, l2, linf)
-

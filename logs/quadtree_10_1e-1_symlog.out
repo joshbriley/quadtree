@@ -1,0 +1,5 @@
+Starting Adaptive Quadtree Decomposition...
+MAX DEPTH REACHED depth=10 error=1.137e-01
+MAX DEPTH REACHED depth=10 error=1.971e+00
+Saved quadtree to: /mnt/home/brileyjo/research/quadtree/tables/quadtree-10-0.1-4321-symlog-error.h5
+Execution time: 116.602999 seconds

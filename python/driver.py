@@ -43,6 +43,12 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
         fill_value=None,
     )
 
+    # Evaluate the interpolator at a specific point (for testing purposes)
+    test_x, test_y = 1.3e-12, 1050  # Example density value, 1050
+    interpolated_value = table_interp((test_x, test_y))
+    print(f"=====\nInterpolated value at ({test_x:.3e}, {test_y:.3e}): {interpolated_value:.6f}\n=====")
+
+
     # # ----------------------------------------------------------
     # # Build test grid (for error computation)
     # # ----------------------------------------------------------
@@ -74,10 +80,6 @@ def run_driver(csv_path, max_depth, thresholds, test_resolution):
             ymax,
             thresh,
             max_depth,
-            global_points,
-            global_vals,
-            x_coords,
-            y_coords,
             table_interp,
         )
 
