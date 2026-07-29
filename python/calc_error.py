@@ -159,8 +159,8 @@ if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_files = ["tables/quadtree-10-0.01-4321-new.h5",
-                  "tables/quadtree-10-0.01-4321-symlog-error.h5",]
+    tree_files = ["tables/quadtree-8-0.01-4321-symlog-error.h5",]
+                #   "tables/quadtree-10-0.01-4321-symlog-error.h5",]
                 #   "tables/quadtree-10-0.001-4321-symlog-error.h5",
                 #   "tables/quadtree-10-0.0001-4321-symlog-error.h5",
                 #   "tables/quadtree-10-1e-05-4321-symlog-error.h5",]

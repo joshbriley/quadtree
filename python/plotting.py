@@ -164,8 +164,8 @@ def plot_error_heatmap(depth, err, quadtree_file, test_file, n_points=int(1e6), 
     plt.close()
 
 if __name__ == "__main__":
-    depth = 10
-    err = 0.0001
+    depth = 8
+    err = 0.01
     tree_file = f"tables/quadtree-{depth}-{err}-4321-symlog-error.h5"
     test_file = "../hdf5_data/testing_data.hdf5"
 
