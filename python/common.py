@@ -14,12 +14,12 @@ def load_hdf5_table(file_path):
     with h5py.File(file_path, "r") as f:
         X_raw = f["den"][:]
         Y_raw = f["temp"][:]
-        F = f["Table_Values"]["f"][:]
+        F_raw = f["Table_Values"]["f"][:]
 
     # Build tree in log10-space to better resolve multi-decade behavior.
     X = np.log10(X_raw)
     Y = np.log10(Y_raw)
-    # F = symlog(F_raw)
+    F = F_raw
 
     # den varies along columns, temp varies along rows
     x_coords = X[0, :]

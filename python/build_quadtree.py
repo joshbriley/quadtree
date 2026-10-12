@@ -2,90 +2,51 @@
 
 import os
 import sys
-import time
-
 import h5py
 import numpy as np
 from cpp import polyinterp  # HPCC
 from scipy.interpolate import RegularGridInterpolator
-
-start_time = time.perf_counter()
+from python.common import symlog, load_hdf5_table
 
 # Config parameters
 hdf5_file = "../hdf5_data/training_data.hdf5"
-error_threshold = 1e-4
-# ppc = 4 # Minimum desired points per cell
-max_depth = 10  # Maximum depth of quadtree
+error_threshold = 1e-2
+max_depth = 8
 
-# with h5py.File(hdf5_file, "r") as f:
-#     ds = f["den"][:] # Assuming den, temp, and f are all the same dimension
-#     ds_size = ds.size
-
-# max_depth = int((np.log(ds_size/ppc))/np.log(4)) # For training_data.hdf5 this is 10 
-# print(f"Max depth calculated from training data: {max_depth}")
-# print(f"Error threshold: {error_threshold}\nMax depth: {max_depth}")
-
-def symlog(x, linthresh=1.0, base=10.0):
-    x = np.asarray(x)
-    return np.sign(x) * np.log1p(np.abs(x) / linthresh) / np.log(base)
-
-
-def inverse_symlog(y, linthresh=1.0, base=10.0):
-    y = np.asarray(y)
-    return np.sign(y) * linthresh * np.expm1(np.abs(y) * np.log(base))
-
-
-# Load HDF5 table
-def load_hdf5_table(file_path):
-    with h5py.File(file_path, "r") as f:
-        x_raw = f["den"][:]
-        y_raw = f["temp"][:]
-        values = f["Table_Values"]["f"][:]
-
-    x = np.log10(x_raw)
-    y = np.log10(y_raw)
-    x_coords = x[0, :]
-    y_coords = y[:, 0]
-    global_values = values.ravel()
-    global_points = np.column_stack((x.ravel(), y.ravel()))
-
-    return x_coords, y_coords, global_points, global_values
-
-
-def evaluate_quad_error(
-    xmin, xmax, ymin, ymax,
-    global_points, global_values,
-    x_coords, y_coords,
-    table_interp,
-    rel_floor=1e-6,
-):
-    """Compute error of local polynomial approximation on a cell."""
+def evaluate_quad_error(xmin, xmax, ymin, ymax, global_points, global_values, table_interp):
+    """Compute error of local polynomial approximation on a cell using a Cubic
+    Lagrange Interpolant"""
     nodes = np.array([0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0])
     x_nodes = xmin + (xmax - xmin) * nodes
     y_nodes = ymin + (ymax - ymin) * nodes
     xx, yy = np.meshgrid(x_nodes, y_nodes, indexing="ij")
-    corner_vals = table_interp(np.column_stack((xx.ravel(), yy.ravel()))).reshape(4, 4)
 
+    # 4x4 stencil of values
+    stencil = table_interp(np.column_stack((xx.ravel(), yy.ravel()))).reshape(4, 4) 
+
+    # True table values within the current cell
     mask = (
         (global_points[:, 0] >= xmin) & (global_points[:, 0] <= xmax) &
-        (global_points[:, 1] >= ymin) & (global_points[:, 1] <= ymax)
-    )
-
+        (global_points[:, 1] >= ymin) & (global_points[:, 1] <= ymax))
     training_pts = global_points[mask]
     training_vals = global_values[mask]
 
+    # Prevent the QT from over-refining where there is no data:
     if training_pts.size == 0:
         raise ValueError("No points in cell for error evaluation.")
 
-    interp_vals = np.array(
-        [polyinterp.evaluate_polynomial(corner_vals, x, y, (xmin, xmax, ymin, ymax)) for x, y in training_pts]
-    )
+    # Find the interpolated values at the training points
+    interp_vals = []
+    for x, y in training_pts:
+        interp_vals.append(
+        polyinterp.evaluate_polynomial(stencil, x, y, (xmin, xmax, ymin, ymax)))
+    interp_vals = np.array(interp_vals)
 
-    training_vals_symlog = symlog(training_vals)
-    err = np.abs(symlog(interp_vals) - training_vals_symlog) / (np.abs(training_vals_symlog) + 1e-12)
+    # Compute the error in symlog space
+    err = np.abs(symlog(interp_vals) - symlog(training_vals)) / (np.abs(symlog(training_vals)))
     linf_norm = np.max(err)
 
-    return linf_norm, corner_vals
+    return linf_norm, stencil
 
 class QuadTreeNode:
     """Stores a quadtree cell with splitting point and polynomial coefficients."""
@@ -117,49 +78,6 @@ class QuadTreeNode:
             child_key = 'NW' if y >= y_mid else 'SW'
 
         return self.children[child_key].evaluate(x, y, assume_internal_coords=True)
-    
-    def get_leaf_cells(self):
-        """Return list of all leaf cells (xmin, xmax, ymin, ymax, depth)."""
-        if self.is_leaf:
-            depth = self._compute_depth()
-            xmin, xmax, ymin, ymax = self.bounds
-            return [(xmin, xmax, ymin, ymax, depth)]
-
-        cells = []
-        for child in self.children.values():
-            cells.extend(child.get_leaf_cells())
-        return cells
-    
-    def _compute_depth(self):
-        """Compute depth of this node in the tree."""
-        depth = 0
-        node = self
-        while node.split_point is not None:
-            depth += 1
-            node = next(iter(node.children.values()))
-        return depth
-    
-    def _flatten_to_list(self, nodes_list, node_index_map):
-        """Flatten tree to a list for storage."""
-        node_id = len(nodes_list)
-        node_index_map[id(self)] = node_id
-
-        child_indices = {key: None for key in ['NE', 'NW', 'SE', 'SW'] if key in self.children}
-
-        nodes_list.append(
-            {
-                'bounds': self.bounds,
-                'is_leaf': self.is_leaf,
-                'split_point': self.split_point,
-                'coefficients': self.coefficients,
-                'child_indices': child_indices,
-            }
-        )
-
-        for key, child in self.children.items():
-            child_indices[key] = child._flatten_to_list(nodes_list, node_index_map)
-
-        return node_id
 
 
 def _save_quadtree_node(group, node):
@@ -206,8 +124,6 @@ def build_quadtree(
     max_depth,
     global_points,
     global_values,
-    x_coords,
-    y_coords,
     table_interp,
     depth=0,
 ):
@@ -223,8 +139,6 @@ def build_quadtree(
             ymax,
             global_points,
             global_values,
-            x_coords,
-            y_coords,
             table_interp,
         )
     except ValueError:
@@ -264,8 +178,6 @@ def build_quadtree(
             max_depth,
             global_points,
             global_values,
-            x_coords,
-            y_coords,
             table_interp,
             depth + 1,
         )
@@ -298,13 +210,16 @@ def load_quadtree(filepath):
 if __name__ == "__main__":
     x_coords, y_coords, global_points, global_values = load_hdf5_table(hdf5_file)
     table_values = global_values.reshape(len(y_coords), len(x_coords)).T
+
+    # Global linear interpolator
     table_interp = RegularGridInterpolator(
         (x_coords, y_coords),
         table_values,
-        method="linear",
+        method="pchip",
         bounds_error=False,
         fill_value=None,
     )
+
     domain_xmin, domain_xmax = float(x_coords.min()), float(x_coords.max())
     domain_ymin, domain_ymax = float(y_coords.min()), float(y_coords.max())
     train_resolution = len(x_coords)
@@ -319,14 +234,8 @@ if __name__ == "__main__":
         max_depth,
         global_points,
         global_values,
-        x_coords,
-        y_coords, 
         table_interp,
     )
 
     quadtree_file = f"/mnt/home/brileyjo/research/quadtree/tables/quadtree-{max_depth}-{error_threshold}-{train_resolution}-symlog-error.h5"
     save_quadtree(quadtree_root, quadtree_file)
-
-    end_time = time.perf_counter()
-    execution_time = end_time - start_time
-    print(f"Execution time: {execution_time:.6f} seconds")
