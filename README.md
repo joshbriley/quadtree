@@ -47,17 +47,22 @@ Builds an adaptive quadtree surrogate in log10-space.
 Workflow:
 1. Load training data from `training_data.hdf5`.
 2. Convert den and temp to log10.
-3. Build a RegularGridInterpolator on the log-space grid.
-4. Recursively partition the domain, refining cells where local cubic interpolation error exceeds threshold.
-5. Save tree to `tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{RESOLUTION}.npz`.
+3. Fit a global bicubic interpolating spline (`RectBivariateSpline`) to g = symlog(f, `value_linthresh`) on the log-space grid; it supplies g, g_x, g_y, g_xy at cell corners.
+4. Refine the domain pass by pass, splitting every leaf whose bicubic Hermite patch exceeds the error threshold on the table points it covers. After each pass the corner data is reassigned with hanging-node constraints (see Interpolators), and all leaves are re-checked.
+5. Save tree to `tables/quadtree-{MAX_DEPTH}-{ERROR_THRESHOLD}-{RESOLUTION}-hermite.h5`.
 
 Key parameters (in code):
 - `max_depth`: Maximum tree depth (default: 6). Increase to 7–8 for finer resolution.
 - `error_threshold`: Relative error stopping criterion (default: 1e-4).
+- `value_linthresh`: Linear threshold of the symlog transform the leaves interpolate in (default: 1e21). See Interpolators.
 - `hdf5_file`: Path to training data.
 
 Output:
-- `.npz` file containing flattened tree structure, bounds, leaf coefficients, and metadata.
+- HDF5 file (`quadtree_v3`) of flat arrays:
+  - `is_leaf` (uint8, one per node in preorder, children in SW, SE, NW, NE order). Every internal node has four children, so these flags define the whole tree; cell bounds and split points are recomputed from the root `bounds` attribute on load, bit-identical to the build.
+  - `coefficients` (n_leaves × 4 × 4 float64), the leaves' Hermite matrices in the same preorder.
+  - Attributes: `format`, `interpolant`, `coord_space`, `value_linthresh`, root `bounds`.
+- File size is essentially the coefficient payload (128 bytes per leaf).
 
 ### `calc_error.py`
 **Loads a quadtree and evaluates error on testing data.**
@@ -81,13 +86,17 @@ Output:
 
 ### QuadTreeNode
 - Stores a rectangular cell in log10-space.
-- Holds 4×4 nodal values (polynomial coefficients) at leaf nodes.
+- Holds a 4×4 Hermite matrix at leaf nodes: g, g_x, g_y, g_xy at the four corners, where g = symlog(f, `value_linthresh`) and derivatives are w.r.t. the log10 coordinates.
+- `evaluate` returns f = inverse_symlog(g, `value_linthresh`); the linthresh is stored in the tree file.
 - Navigates children by quadrant: NE, NW, SE, SW.
 - `evaluate(x, y)` converts physical (den, temp) to log10 automatically and traverses the tree.
 
 ### Interpolators
-- **Build phase**: RegularGridInterpolator on log10-space grid (fast, no triangulation).
-- **C++ module**: `polyinterp.evaluate_polynomial()` evaluates cubic Lagrange polynomials at (x, y) within a cell's bounds.
+- **Build phase**: global bicubic spline of g = symlog(f, `value_linthresh`) on the log10-space grid provides corner values and derivatives.
+- **Value space**: f spans ~10^49 and changes sign along a curve in the (den, temp) plane, where |f| is still ~10^13 one grid point away. With a small linthresh, symlog(f) jumps by ~2·log10|f| across that curve, and cubic overshoot there turns into astronomically wrong f after `inverse_symlog`. `value_linthresh` must therefore exceed |f| near the sign change. 1e21 (just above the largest positive f, ~3.7e20) makes the transform linear through the sign change and logarithmic in the large negative region, which gave the fewest leaves for a given error. For this table, linthresh ≲ 1e17 blows up near the sign change; linthresh → ∞ reduces to interpolating raw f.
+- **Leaf interpolant**: tensor-product cubic Hermite (bicubic) patch. Neighbouring leaves share corner data, so g, and hence f, and their gradients are continuous (C1) across every cell edge. A corner that lies inside a coarser neighbour's edge (a hanging node) takes its value and derivatives from that neighbour's patch rather than the spline, which keeps the surface C1 where cell sizes change.
+- **C++ module**: `polyinterp.evaluate_hermite()` evaluates a leaf's Hermite patch at (x, y) within the cell's bounds. Rebuild it after changing `cpp/polyinterp.cpp` with `python setup.py build_ext --inplace` from `cpp/`.
+- Trees saved with the earlier cubic Lagrange interpolant are rejected by `load_quadtree`; rebuild them.
 
 ### Coordinate Space
 Trees can be built in:

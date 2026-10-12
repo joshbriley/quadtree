@@ -3,7 +3,18 @@
 
 namespace py = pybind11;
 
-double evaluate_polynomial(
+// Cubic Hermite basis on [lo, lo + h] at normalized t:
+// [value at lo, value at hi, slope at lo, slope at hi] (slopes in physical units).
+static void hermite_basis(double t, double h, double out[4]) {
+    double t2 = t * t;
+    double t3 = t2 * t;
+    out[0] = 2.0 * t3 - 3.0 * t2 + 1.0;
+    out[1] = 3.0 * t2 - 2.0 * t3;
+    out[2] = h * (t3 - 2.0 * t2 + t);
+    out[3] = h * (t3 - t2);
+}
+
+double evaluate_hermite(
     py::array_t<double> vals,
     double x,
     double y,
@@ -28,30 +39,19 @@ double evaluate_polynomial(
         throw py::value_error("Cell bounds are degenerate");
     }
 
-    // Normalize
-    double tx = (x - xmin) / (xmax - xmin);
-    double ty = (y - ymin) / (ymax - ymin);
+    double hx = xmax - xmin;
+    double hy = ymax - ymin;
 
-    double nodes[4] = {0.0, 1.0/3.0, 2.0/3.0, 1.0};
-
-    double Lx[4] = {1,1,1,1};
-    double Ly[4] = {1,1,1,1};
-
-    // Compute Lagrange basis
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            if (i != j) {
-                Lx[i] *= (tx - nodes[j]) / (nodes[i] - nodes[j]);
-                Ly[i] *= (ty - nodes[j]) / (nodes[i] - nodes[j]);
-            }
-        }
-    }
+    double Hx[4];
+    double Hy[4];
+    hermite_basis((x - xmin) / hx, hx, Hx);
+    hermite_basis((y - ymin) / hy, hy, Hy);
 
     // Tensor product
     double result = 0.0;
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
-            result += v(i,j) * Lx[i] * Ly[j];
+            result += v(i,j) * Hx[i] * Hy[j];
         }
     }
 
@@ -60,6 +60,6 @@ double evaluate_polynomial(
 
 // Python module name = polyinterp
 PYBIND11_MODULE(polyinterp, m) {
-    m.def("evaluate_polynomial", &evaluate_polynomial,
-          "Evaluate tensor-product cubic interpolation");
+    m.def("evaluate_hermite", &evaluate_hermite,
+          "Evaluate tensor-product cubic Hermite interpolation");
 }

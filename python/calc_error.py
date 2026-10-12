@@ -2,6 +2,7 @@ import numpy as np
 import h5py
 import os
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from scipy.interpolate import RegularGridInterpolator
 from python.build_quadtree import load_quadtree
 
@@ -134,39 +135,43 @@ def compute_quadtree_error(
 
     return l1, l2, linf, size_mb
 
-def plot_error_norms(size_mb, l1, l2, linf):
+def plot_error_norms(size_mb, l1, l2, linf, output, caption):
     order = np.argsort(size_mb)
     size_mb = size_mb[order]
-    l1 = l1[order]
-    l2 = l2[order]
-    linf = linf[order]
 
-    plt.figure(figsize=(8, 6))
-    plt.loglog(size_mb, l1, marker="o", linewidth=2, label=r"$L_1$")
-    plt.loglog(size_mb, l2, marker="s", linewidth=2, label=r"$L_2$")
-    plt.loglog(size_mb, linf, marker="^", linewidth=2, label=r"$L_\infty$")
-    plt.xlabel("Table size (MB)")
-    plt.ylabel("Relative error norm")
-    plt.title("Error vs Table Size")
-    plt.figtext(0.5, 0.01, "Consistent D_max = 10, error thresholds = [0.1, 0.01, 0.001, 0.0001, 1e-05] Trained in with symlog error.", ha="center", fontsize=8)
-    plt.grid(True, which="both", linestyle="--", alpha=0.5)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("ErrorVsSize-10-symlog-error.png", dpi=500)
-    plt.show()
+    # L1 <= L2 <= Linf is an ordered family, so one blue ramp light -> dark.
+    norms = ((r"$L_1$", l1[order], "#86b6ef", "o"),
+             (r"$L_2$", l2[order], "#2a78d6", "s"),
+             (r"$L_\infty$", linf[order], "#104281", "^"))
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for label, values, color, marker in norms:
+        ax.loglog(size_mb, values, color=color, marker=marker, markersize=8, linewidth=2, label=label)
+        ax.annotate(label, (size_mb[-1], values[-1]), xytext=(8, 0), textcoords="offset points",
+                    va="center", fontsize=12, color="#52514e")
+    plain = FuncFormatter(lambda v, _: f"{v:g}")
+    ax.xaxis.set_major_formatter(plain)
+    ax.xaxis.set_minor_formatter(plain)
+    ax.set_xlabel("Table size (MB)", color="#52514e")
+    ax.set_ylabel("Relative error norm", color="#52514e")
+    ax.set_title("Error vs Table Size", color="#0b0b0b")
+    fig.text(0.5, 0.01, caption, ha="center", fontsize=8, color="#52514e")
+    ax.grid(True, which="major", color="#e1e0d9", linewidth=0.8)
+    ax.tick_params(colors="#52514e")
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.legend(frameon=False)
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.savefig(output, dpi=500)
+    plt.close(fig)
 
 if __name__ == "__main__":
 
     # Parameters
     test_file = "../hdf5_data/testing_data.hdf5" # Dense reference data
-    tree_files = ["tables/quadtree-8-0.01-4321-symlog-error.h5",]
-                #   "tables/quadtree-10-0.01-4321-symlog-error.h5",]
-                #   "tables/quadtree-10-0.001-4321-symlog-error.h5",
-                #   "tables/quadtree-10-0.0001-4321-symlog-error.h5",
-                #   "tables/quadtree-10-1e-05-4321-symlog-error.h5",]
-                #   "tables/quadtree-10-0.01-4321.h5",
-                #   "tables/quadtree-10-0.001-4321.h5",
-                #   "tables/quadtree-10-0.0001-4321.h5",]
+    max_depth = 10
+    thresholds = [0.1, 0.01, 0.001, 0.0001, 1e-05]
+    tree_files = [f"tables/quadtree-{max_depth}-{t}-4321-hermite.h5" for t in thresholds]
 
     n_random_points = int(1e+6)  # Number of random points to sample for error evaluation
 
@@ -190,4 +195,6 @@ if __name__ == "__main__":
         print(f"Number of random points evaluated: {n_random_points:.1e}")
         print(f"Quadtree file: {tree_files[i]}\n")
 
-    plot_error_norms(size_mb, l1, l2, linf)
+    plot_error_norms(size_mb, l1, l2, linf,
+                     output=f"figs/ErrorVsSize-{max_depth}-hermite.png",
+                     caption=f"Bicubic Hermite (C1) quadtree, D_max = {max_depth}, error thresholds = {thresholds}, symlog error criterion.")
